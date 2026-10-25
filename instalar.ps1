@@ -1,33 +1,51 @@
 ﻿# Instala o miner da Kick (esta pasta), baixa o miner da Twitch do projeto original
 # e cria o atalho "Miners Kick e Twitch" na Área de Trabalho.
-# Uso: powershell -ExecutionPolicy Bypass -File .\instalar.ps1
+# Uso: dois cliques no instalar.bat (ou: powershell -ExecutionPolicy Bypass -File .\instalar.ps1)
 # Pode ser rodado de novo: o que já estiver instalado é mantido.
 
 # "Stop" quebraria no PowerShell 5.1: stderr de programas externos vira erro fatal. Cada passo checa $LASTEXITCODE.
+$ProgressPreference = "SilentlyContinue"  # a barra de progresso deixa o download até 10x mais lento no PS 5.1
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
 $Repo = $PSScriptRoot
 $TwitchDir = Join-Path $Repo "twitch\Twitch-Channel-Points-Miner-v2"
-# Versão do miner da Twitch revisada para este projeto
+# Versão do miner da Twitch revisada para este projeto.
+# SHA completo: um prefixo curto poderia, em tese, coincidir com outro commit.
 $TwitchRepo = "https://github.com/rdavydov/Twitch-Channel-Points-Miner-v2"
-# SHA completo: um prefixo curto poderia, em tese, coincidir com outro commit
 $TwitchCommit = "8a35f87cd5345074003c7f6eedb48aedadc3b9b3"
 
 function Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Green }
 function Fail($msg) { Write-Host "`nERRO: $msg" -ForegroundColor Red; exit 1 }
 
 # 1. Python 3.10 a 3.13 (versões mais novas podem não ter as bibliotecas prontas)
-Step "Procurando Python 3.10 a 3.13"
-$Py = $null
-if (Get-Command py -ErrorAction SilentlyContinue) {
-    foreach ($v in "3.12", "3.13", "3.11", "3.10") {
-        & py "-$v" -c "import sys" 2>$null
-        if ($LASTEXITCODE -eq 0) { $Py = @("py", "-$v"); break }
+function Find-Python {
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        foreach ($v in "3.12", "3.13", "3.11", "3.10") {
+            & py "-$v" -c "import sys" 2>$null
+            if ($LASTEXITCODE -eq 0) { return @("py", "-$v") }
+        }
     }
+    # Instalação feita agora pelo winget ainda não está no PATH desta janela
+    $local = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"
+    if (Test-Path $local) { return @($local) }
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        & python -c "import sys; sys.exit(0 if (3, 10) <= sys.version_info[:2] <= (3, 13) else 1)" 2>$null
+        if ($LASTEXITCODE -eq 0) { return @("python") }
+    }
+    return $null
 }
-if (-not $Py -and (Get-Command python -ErrorAction SilentlyContinue)) {
-    & python -c "import sys; sys.exit(0 if (3, 10) <= sys.version_info[:2] <= (3, 13) else 1)" 2>$null
-    if ($LASTEXITCODE -eq 0) { $Py = @("python") }
+
+Step "Procurando Python 3.10 a 3.13"
+$Py = Find-Python
+if (-not $Py) {
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Fail "Python nao encontrado. Instale o Python 3.12 em https://www.python.org/downloads/ e rode o instalador de novo."
+    }
+    Step "Instalando Python 3.12 (pode levar alguns minutos)"
+    winget install -e --id Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements
+    $Py = Find-Python
+    if (-not $Py) { Fail "A instalacao do Python falhou. Instale o Python 3.12 em https://www.python.org/downloads/ e rode o instalador de novo." }
 }
-if (-not $Py) { Fail "Python 3.10 a 3.13 nao encontrado. Instale com: winget install Python.Python.3.12" }
 $PyExe = $Py[0]
 $PyArgs = @($Py | Select-Object -Skip 1)
 function PyRun { & $PyExe @PyArgs @args }
@@ -36,8 +54,6 @@ Write-Host ("Usando: " + (PyRun -c "import sys; print(sys.executable, sys.versio
 PyRun -c "import tkinter" 2>$null
 if ($LASTEXITCODE -ne 0) { Fail "Este Python nao tem tkinter (necessario para a janela de controle). Reinstale pelo instalador oficial do python.org." }
 
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Fail "Git nao encontrado. Instale com: winget install Git.Git" }
-
 # 2. Miner da Kick
 Step "Instalando o miner da Kick"
 if (-not (Test-Path "$Repo\.venv\Scripts\python.exe")) { PyRun -m venv "$Repo\.venv" }
@@ -45,27 +61,32 @@ if (-not (Test-Path "$Repo\.venv\Scripts\python.exe")) { PyRun -m venv "$Repo\.v
 if ($LASTEXITCODE -ne 0) { Fail "pip falhou no miner da Kick." }
 if (-not (Test-Path "$Repo\config.json")) {
     Copy-Item "$Repo\config.example.json" "$Repo\config.json"
-    Write-Host "Criado config.json a partir do config.example.json"
 }
 
 # 3. Miner da Twitch, baixado do projeto original na versão revisada
 Step "Instalando o miner da Twitch"
 if (-not (Test-Path $TwitchDir)) {
-    git clone -q $TwitchRepo $TwitchDir
-    if ($LASTEXITCODE -ne 0) { Fail "Nao foi possivel baixar $TwitchRepo" }
-    git -C $TwitchDir -c advice.detachedHead=false checkout -q $TwitchCommit
-    if ($LASTEXITCODE -ne 0) { Fail "Versao $TwitchCommit do miner da Twitch nao encontrada." }
+    $Zip = Join-Path $env:TEMP "twitch-miner-$TwitchCommit.zip"
+    try {
+        Invoke-WebRequest "$TwitchRepo/archive/$TwitchCommit.zip" -OutFile $Zip -UseBasicParsing
+        Expand-Archive $Zip -DestinationPath "$Repo\twitch" -Force
+    } catch { Fail "Nao foi possivel baixar o miner da Twitch: $($_.Exception.Message)" }
+    Remove-Item $Zip -ErrorAction SilentlyContinue
+    Rename-Item "$Repo\twitch\Twitch-Channel-Points-Miner-v2-$TwitchCommit" "Twitch-Channel-Points-Miner-v2"
+    Set-Content "$TwitchDir\.versao" $TwitchCommit
 }
-# Confere sempre, inclusive em reinstalacao: a pasta precisa estar exatamente na versao revisada
-$Head = (git -C $TwitchDir rev-parse HEAD).Trim()
+# Confere sempre, inclusive em reinstalação: a pasta precisa estar exatamente na versão revisada
+if (Test-Path "$TwitchDir\.git") { $Head = (git -C $TwitchDir rev-parse HEAD).Trim() }
+elseif (Test-Path "$TwitchDir\.versao") { $Head = (Get-Content "$TwitchDir\.versao").Trim() }
+else { $Head = "desconhecida" }
 if ($Head -ne $TwitchCommit) { Fail "O miner da Twitch esta na versao $Head, esperado $TwitchCommit. Apague a pasta $TwitchDir e rode de novo." }
+
 if (-not (Test-Path "$TwitchDir\.venv\Scripts\python.exe")) { PyRun -m venv "$TwitchDir\.venv" }
 & "$TwitchDir\.venv\Scripts\python.exe" -m pip install -q --disable-pip-version-check -r "$TwitchDir\requirements.txt"
 if ($LASTEXITCODE -ne 0) { Fail "pip falhou no miner da Twitch." }
-if (-not (Test-Path "$TwitchDir\run.py")) {
-    Copy-Item "$Repo\twitch\run.example.py" "$TwitchDir\run.py"
-    Write-Host "Criado run.py a partir do twitch\run.example.py"
-}
+if (-not (Test-Path "$TwitchDir\run.py")) { Copy-Item "$Repo\twitch\run.example.py" "$TwitchDir\run.py" }
+# Script de login é nosso: sempre atualiza
+Copy-Item "$Repo\twitch\login_twitch.py" "$TwitchDir\login_twitch.py" -Force
 
 # 4. Atalho na Área de Trabalho, abrindo a janela de controle sem console
 Step "Criando atalho na Area de Trabalho"
@@ -79,10 +100,5 @@ $Lnk.Description = "Iniciar e parar os miners da Kick e da Twitch"
 if (Test-Path "$Repo\controle\miners.ico") { $Lnk.IconLocation = "$Repo\controle\miners.ico,0" }
 $Lnk.Save()
 
-Step "Pronto! Falta configurar:"
-Write-Host "  1. Kick:   coloque seu token e seus canais em $Repo\config.json"
-Write-Host "  2. Twitch: coloque seu usuario e seus canais em $TwitchDir\run.py"
-Write-Host "  3. Twitch, so na primeira vez: rode o comando abaixo e digite o codigo em twitch.tv/activate"
-Write-Host "       cd `"$TwitchDir`"; .\.venv\Scripts\python.exe run.py"
-Write-Host "     Depois do login, feche com Ctrl+C."
-Write-Host "  4. Abra o atalho 'Miners Kick e Twitch' na Area de Trabalho e clique em Iniciar."
+Step "Pronto!"
+Write-Host "  Abra o atalho 'Miners Kick e Twitch' na Area de Trabalho e clique em 'Configurar'."
