@@ -117,6 +117,8 @@ class AccountWorker:
 
     async def start(self):
         self._running = True
+        # O painel roda em outra thread e precisa deste loop para agendar reconexões
+        self.loop = asyncio.get_running_loop()
         logger.info(
             f"[{self.alias}] Запуск: "
             f"{len(self.state.streamers)} стримеров, "
@@ -376,7 +378,8 @@ class AccountWorker:
 
         while st.is_watching and self._running:
             try:
-                await asyncio.sleep(random.uniform(120, 180))
+                # A Kick dá pontos a cada 10 min assistidos; consultar antes disso não muda nada
+                await asyncio.sleep(random.uniform(600, 615))
                 if not st.is_watching:
                     break
 
@@ -450,10 +453,41 @@ class AccountWorker:
                     ),
                     "stream_id": s.stream_id,
                     "errors": s.error_count,
+                    "connected": bool(
+                        s.ws_client and s.ws_client.state.is_connected
+                    ),
+                    "last_message": (
+                        datetime.fromtimestamp(
+                            s.ws_client.last_message_at
+                        ).isoformat()
+                        if s.ws_client and s.ws_client.last_message_at
+                        else None
+                    ),
+                    "reconnect_attempts": (
+                        s.ws_client.state.reconnect_attempts
+                        if s.ws_client else 0
+                    ),
                 }
                 for name, s in self.state.streamers.items()
             },
         }
+
+    async def check_now(self):
+        await self._check_all_online()
+        await self._rebalance()
+
+    async def reconnect(self, names: List[str]):
+        """Derruba e refaz a conexão (com WS-token novo) dos canais pedidos."""
+        async with self._rebalance_lock:
+            for name in names:
+                st = self.state.streamers[name]
+                if st.is_watching or st.ws_client:
+                    await self._stop_streamer(name)
+                # A live pode ter acabado: confere antes de reconectar
+                stream_id = self._get_utility(name).get_stream_id(self.token)
+                st.is_online = stream_id is not None
+                st.stream_id = stream_id
+        await self._rebalance()
 
 
 class AccountManager:
@@ -548,6 +582,40 @@ class AccountManager:
 
     def get_all_status(self) -> List[dict]:
         return [w.get_status() for w in self.workers]
+
+    def request_reconnect(self, streamers: Optional[List[str]] = None) -> int:
+        """Chamado pela thread do painel. Sem lista, reconecta todos os ao vivo."""
+        count = 0
+        for w in self.workers:
+            if not getattr(w, "loop", None):
+                continue
+            # Lista vazia não reconecta nada; só None significa "todos"
+            if streamers is not None:
+                names = [n for n in streamers if n in w.state.streamers]
+            else:
+                names = [
+                    n for n, s in w.state.streamers.items()
+                    if s.is_online or s.is_watching
+                ]
+            if names:
+                fut = asyncio.run_coroutine_threadsafe(w.reconnect(names), w.loop)
+                fut.add_done_callback(
+                    lambda f: not f.cancelled() and f.exception() and logger.error(
+                        f"Reconexão falhou: {f.exception()}"
+                    )
+                )
+                count += len(names)
+        return count
+
+    def check_now(self, timeout: float = 90) -> None:
+        """Chamado pela thread do painel: confere agora quem está ao vivo e conecta o que faltar.
+        Bloqueia até terminar, para o painel saber quando mostrar o resultado."""
+        futs = [
+            asyncio.run_coroutine_threadsafe(w.check_now(), w.loop)
+            for w in self.workers if getattr(w, "loop", None)
+        ]
+        for fut in futs:
+            fut.result(timeout=timeout)
 
     def get_all_streamers_flat(self) -> List[str]:
         seen = set()

@@ -32,3 +32,14 @@ Thumbs.db
 
 # 🔹 Playwright browsers
 ms-playwright/
+
+# 🔹 Dados pessoais e de execução (nunca publicar)
+cookies/
+*.pkl
+miner-log.txt
+miner-saida.txt
+miner-erros.txt
+*.ico
+
+# 🔹 Miner da Twitch: baixado pelo instalar.ps1 a partir do projeto original
+twitch/Twitch-Channel-Points-Miner-v2/

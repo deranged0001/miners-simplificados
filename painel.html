@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kick Pontos</title>
+<style>
+:root {
+  --bg: #0b0d0c;
+  --surface: #131715;
+  --surface-2: #1a1f1c;
+  --line: #242b27;
+  --text: #e9efeb;
+  --muted: #8a968f;
+  --green: #53fc18;
+  --green-soft: rgba(83, 252, 24, 0.12);
+  --red: #ff5a5f;
+  --amber: #ffb547;
+  --radius: 14px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding: 28px 16px 48px; }
+
+header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+.brand { display: flex; align-items: center; gap: 12px; }
+.logo {
+  width: 40px; height: 40px; border-radius: 10px; background: var(--green);
+  color: #000; font-weight: 900; font-size: 22px; display: grid; place-items: center;
+}
+.brand h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+.brand p { color: var(--muted); font-size: 13px; }
+.sync { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.sync.ok .dot { background: var(--green); box-shadow: 0 0 0 4px var(--green-soft); }
+.sync.err .dot { background: var(--red); }
+
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 28px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; }
+.stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+.stat .value { font-size: 28px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.stat .value.green { color: var(--green); }
+
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.toolbar h2 { font-size: 16px; font-weight: 600; }
+.filters { display: flex; gap: 6px; }
+.filters button {
+  background: var(--surface); color: var(--muted); border: 1px solid var(--line);
+  border-radius: 999px; padding: 6px 14px; font: inherit; font-size: 13px; cursor: pointer;
+}
+.filters button[aria-pressed="true"] { background: var(--green-soft); color: var(--green); border-color: rgba(83,252,24,.35); }
+.filters button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 16px; display: flex; flex-direction: column; gap: 14px; position: relative;
+  transition: border-color .2s;
+}
+.card.watching { border-color: rgba(83,252,24,.4); background: linear-gradient(180deg, rgba(83,252,24,.06), var(--surface) 60%); }
+.card.offline { opacity: .62; }
+.top { display: flex; align-items: center; gap: 12px; }
+.avatar {
+  width: 42px; height: 42px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  font-weight: 700; font-size: 17px; color: #0b0d0c;
+}
+.name { min-width: 0; flex: 1; }
+.name a { color: var(--text); text-decoration: none; font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.name a:hover { color: var(--green); }
+.name small { color: var(--muted); font-size: 12px; }
+.pill { font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+.pill.watching { background: var(--green); color: #000; }
+.pill.live { background: rgba(255,90,95,.15); color: var(--red); }
+.pill.offline { background: var(--surface-2); color: var(--muted); }
+.pill.warn { background: rgba(255,181,71,.15); color: var(--amber); }
+.card.warn { border-color: rgba(255,181,71,.45); }
+.btn {
+  background: var(--surface-2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 8px; padding: 5px 10px; font: inherit; font-size: 12px; cursor: pointer;
+}
+.btn:hover:not(:disabled) { border-color: var(--green); color: var(--green); }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.alive { color: var(--muted); font-size: 12px; }
+.pill.watching::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #000; margin-right: 6px; vertical-align: 1px; animation: pulse 1.4s infinite; }
+@keyframes pulse { 50% { opacity: .25; } }
+
+.points { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.points .num { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.points .gain { color: var(--green); font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; }
+.points .gain:empty { display: none; }
+.flash { position: absolute; top: 64px; right: 16px; color: var(--green); font-weight: 800; animation: rise 1.6s ease-out forwards; pointer-events: none; }
+@keyframes rise { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-22px); } }
+.meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.meta .warn { color: var(--amber); }
+
+.empty { color: var(--muted); text-align: center; padding: 48px 16px; border: 1px dashed var(--line); border-radius: var(--radius); }
+
+@media (max-width: 760px) {
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .stat .value { font-size: 22px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pill.watching::before, .flash { animation: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo" aria-hidden="true">K</div>
+      <div>
+        <h1>Kick Pontos</h1>
+        <p id="accounts">Carregando…</p>
+      </div>
+    </div>
+    <div class="sync" id="sync" role="status"><span class="dot"></span><span id="syncText">Conectando…</span></div>
+  </header>
+
+  <section class="stats" aria-label="Resumo">
+    <div class="stat"><div class="label">Total de pontos</div><div class="value" id="sTotal">–</div></div>
+    <div class="stat"><div class="label">Ganho nesta sessão</div><div class="value green" id="sGain">–</div></div>
+    <div class="stat"><div class="label">Assistindo agora</div><div class="value" id="sWatch">–</div></div>
+    <div class="stat"><div class="label">Ao vivo</div><div class="value" id="sLive">–</div></div>
+  </section>
+
+  <div class="toolbar">
+    <h2>Canais</h2>
+    <div class="actions">
+      <div class="filters" role="group" aria-label="Filtro">
+        <button data-f="all" aria-pressed="true">Todos</button>
+        <button data-f="live" aria-pressed="false">Ao vivo</button>
+        <button data-f="watching" aria-pressed="false">Assistindo</button>
+      </div>
+      <button class="btn" id="chk">✓ Verificar status</button>
+      <button class="btn" id="reFail" disabled>↻ Reconectar falhas</button>
+      <button class="btn" id="reAll">↻ Reconectar todos</button>
+    </div>
+  </div>
+  <p class="alive" id="msg" role="status" style="margin:-4px 0 12px"></p>
+  <div class="grid" id="grid"></div>
+</div>
+
+<script>
+const fmt = n => Number(n || 0).toLocaleString("pt-BR");
+const $ = id => document.getElementById(id);
+let filter = "all";
+let lastData = null;
+const prevPoints = {};
+
+// Pontos de quando a aba foi aberta, para calcular o ganho da sessão
+let base = {};
+try { base = JSON.parse(sessionStorage.getItem("kp_base") || "{}"); } catch (e) {}
+const saveBase = () => { try { sessionStorage.setItem("kp_base", JSON.stringify(base)); } catch (e) {} };
+
+const hue = s => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+
+function ago(iso) {
+  if (!iso) return "sem dados";
+  const t = new Date(iso);
+  if (isNaN(t)) return iso;
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (s < 60) return `há ${s}s`;
+  if (s < 3600) return `há ${Math.floor(s / 60)} min ${s % 60}s`;
+  return `há ${Math.floor(s / 3600)} h`;
+}
+
+function rows(data) {
+  const out = [];
+  for (const acc of data.accounts || []) {
+    for (const [name, s] of Object.entries(acc.streamers || {})) {
+      out.push({ name, alias: acc.alias, ...s });
+    }
+  }
+  // Modo antigo, sem account manager
+  if (!out.length) {
+    for (const name of Object.keys(data.streamers || {})) {
+      const live = data.stream_status?.[name] === "online";
+      out.push({ name, alias: data.streamers[name], points: data.points?.[name], online: live, watching: live, last_update: null, priority: 0 });
+    }
+  }
+  for (const r of out) r.state = connState(r);
+  const rank = r => ({ watching: 0, connecting: 1, stale: 1, reconnecting: 1, live: 2, offline: 3 })[r.state];
+  return out.sort((a, b) => rank(a) - rank(b) || (a.priority ?? 0) - (b.priority ?? 0));
+}
+
+// O handshake/ping do miner roda a cada 25–35 s; sem resposta da Kick por 90 s, a conexão está morta
+const STALE_MS = 90 * 1000;
+
+// "Assistindo" só quando o WebSocket está conectado e a Kick respondeu há pouco
+function connState(r) {
+  if (!r.watching) return r.online ? "live" : "offline";
+  if (r.connected === undefined) return "watching";  // modo antigo, sem esses campos
+  if (!r.connected) return "reconnecting";
+  if (!r.last_message) return "connecting";
+  return Date.now() - new Date(r.last_message) > STALE_MS ? "stale" : "watching";
+}
+
+const LABELS = {
+  watching: "Assistindo", connecting: "Conectando", reconnecting: "Reconectando",
+  stale: "Sem resposta", live: "Ao vivo", offline: "Offline",
+};
+const PILL = { watching: "watching", live: "live", offline: "offline", connecting: "warn", reconnecting: "warn", stale: "warn" };
+
+function render() {
+  if (!lastData) return;
+  const all = rows(lastData);
+  let total = 0, gain = 0, watching = 0, live = 0;
+
+  for (const r of all) {
+    const p = Number(r.points || 0);
+    total += p;
+    if (r.state === "watching") watching++;
+    if (r.state !== "offline") live++;
+    if (p > 0 && base[r.name] === undefined) base[r.name] = p;
+    if (base[r.name] !== undefined) gain += Math.max(0, p - base[r.name]);
+  }
+  saveBase();
+
+  const maxConc = (lastData.accounts || []).reduce((a, c) => a + (c.max_concurrent || 0), 0);
+  $("sTotal").textContent = fmt(total);
+  $("sGain").textContent = "+" + fmt(gain);
+  $("sWatch").textContent = maxConc ? `${watching} / ${maxConc}` : watching;
+  $("sLive").textContent = `${live} / ${all.length}`;
+  const names = (lastData.accounts || []).map(a => a.alias).filter(Boolean);
+  $("accounts").textContent = names.length ? `Conta: ${names.join(", ")}` : "Minerador de pontos";
+
+  const shown = all.filter(r => filter === "all" || (filter === "live" ? r.state !== "offline" : r.watching));
+  const grid = $("grid");
+  if (!shown.length) {
+    grid.innerHTML = `<div class="empty">Nenhum canal ${filter === "all" ? "configurado" : "neste filtro"}.</div>`;
+    return;
+  }
+
+  grid.replaceChildren(...shown.map(r => {
+    const p = Number(r.points || 0);
+    const state = r.state;
+    const g = base[r.name] !== undefined ? p - base[r.name] : 0;
+
+    const card = document.createElement("article");
+    card.className = "card " + (PILL[state] === "warn" ? "warn" : state);
+    card.innerHTML = `
+      <div class="top">
+        <div class="avatar" style="background:hsl(${hue(r.name)} 70% 62%)" aria-hidden="true"></div>
+        <div class="name"><a target="_blank" rel="noopener"></a><small></small></div>
+        <span class="pill ${PILL[state]}">${LABELS[state]}</span>
+      </div>
+      <div class="points"><span class="num">${fmt(p)}</span><span class="gain">${g > 0 ? "+" + fmt(g) : ""}</span></div>
+      <div class="alive"></div>
+      <div class="meta"><span class="upd"></span><span class="err"></span></div>`;
+    card.dataset.name = r.name;
+    card.dataset.msg = r.last_message || "";
+    card.dataset.tries = r.reconnect_attempts || "";
+    // Nome do canal vem da config: textContent evita injetar HTML
+    card.querySelector(".avatar").textContent = r.name[0].toUpperCase();
+    const a = card.querySelector(".name a");
+    a.textContent = r.name;
+    a.href = "https://kick.com/" + encodeURIComponent(r.name);
+    card.querySelector(".name small").textContent = r.priority !== undefined ? `Prioridade #${r.priority + 1}` : "";
+    card.dataset.upd = r.last_update || "";
+    card.dataset.watch = r.watching ? "1" : "";
+    if (r.errors) {
+      const e = card.querySelector(".err");
+      e.textContent = `${r.errors} erro${r.errors > 1 ? "s" : ""}`;
+      e.className = "warn";
+    }
+
+    if (prevPoints[r.name] !== undefined && p > prevPoints[r.name]) {
+      const f = document.createElement("span");
+      f.className = "flash";
+      f.textContent = "+" + fmt(p - prevPoints[r.name]);
+      card.append(f);
+    }
+    prevPoints[r.name] = p;
+    return card;
+  }));
+  tick();
+}
+
+// Igual ao intervalo do _points_loop no account_manager.py
+const NEXT_MS = 10 * 60 * 1000;
+
+// Atualiza os relógios a cada segundo, sem esperar nova leitura do miner
+function tick() {
+  for (const c of document.querySelectorAll(".card")) {
+    const el = c.querySelector(".upd");
+    const u = c.dataset.upd;
+    if (!u) { el.textContent = "Aguardando primeira leitura"; continue; }
+    let txt = "Atualizado " + ago(u);
+    if (c.dataset.watch) {
+      const left = Math.round((new Date(u).getTime() + NEXT_MS - Date.now()) / 1000);
+      txt += left > 0 ? ` · próxima em ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : " · checando…";
+    }
+    el.textContent = txt;
+  }
+  for (const c of document.querySelectorAll(".card")) {
+    const el = c.querySelector(".alive");
+    if (!c.dataset.watch) { el.textContent = ""; continue; }
+    const tries = c.dataset.tries ? ` · tentativa ${c.dataset.tries}/5` : "";
+    el.textContent = (c.dataset.msg ? "Kick respondeu " + ago(c.dataset.msg) : "Sem resposta da Kick ainda") + tries;
+  }
+}
+setInterval(tick, 1000);
+
+const post = (url, body) => fetch(url, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+}).then(res => { if (!res.ok) throw new Error(res.status); return res.json(); });
+
+// Com falha: conexão caída/sem resposta, ou live que deveria estar sendo assistida e não está
+function failedNames() {
+  if (!lastData) return [];
+  const all = rows(lastData);
+  const maxConc = (lastData.accounts || []).reduce((a, c) => a + (c.max_concurrent || 0), 0);
+  const watchingCount = all.filter(r => r.watching).length;
+  return all.filter(r =>
+    r.state === "reconnecting" || r.state === "stale" ||
+    (r.state === "live" && watchingCount < maxConc)
+  ).map(r => r.name);
+}
+
+function summary() {
+  const all = lastData ? rows(lastData) : [];
+  const ok = all.filter(r => r.state === "watching").length;
+  const failed = failedNames().length;
+  return failed ? `${ok} conectados · ${failed} com falha` : `Tudo certo: ${ok} conectados`;
+}
+
+function updateFailButton() {
+  const btn = $("reFail");
+  if (btn.dataset.busy) return;
+  const n = failedNames().length;
+  btn.disabled = !n;
+  btn.textContent = n ? `↻ Reconectar falhas (${n})` : "↻ Reconectar falhas";
+}
+
+async function reconnect(streamers, btn, label) {
+  btn.disabled = true;
+  btn.dataset.busy = "1";
+  btn.textContent = "Reconectando…";
+  try {
+    const r = await post("/api/reconnect", { streamers });
+    $("msg").textContent = `Reconectando ${r.reconnecting} canal(is). Leva alguns segundos por canal.`;
+  } catch (e) {
+    $("msg").textContent = "Não foi possível pedir a reconexão.";
+  }
+  setTimeout(() => {
+    btn.disabled = false;
+    delete btn.dataset.busy;
+    btn.textContent = label;
+    updateFailButton();
+  }, 15000);
+}
+
+$("reFail").addEventListener("click", e => {
+  const names = failedNames();
+  if (names.length) reconnect(names, e.currentTarget, "↻ Reconectar falhas");
+});
+$("reAll").addEventListener("click", e => {
+  if (confirm("Reconectar todas as lives? O ciclo de 10 min de cada canal pode recomeçar.")) reconnect(null, e.currentTarget, "↻ Reconectar todos");
+});
+$("chk").addEventListener("click", async e => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  btn.textContent = "Verificando…";
+  $("msg").textContent = "Conferindo na Kick quais lives estão no ar (leva uns segundos por canal)…";
+  try {
+    await post("/api/check", {});
+    await refresh();
+    $("msg").textContent = "Verificado às " + new Date().toLocaleTimeString("pt-BR") + " · " + summary();
+  } catch (err) {
+    $("msg").textContent = "A verificação falhou. Veja o terminal do miner.";
+  }
+  btn.disabled = false;
+  btn.textContent = "✓ Verificar status";
+});
+
+async function refresh() {
+  const sync = $("sync");
+  try {
+    const res = await fetch("/api/data", { cache: "no-store" });
+    if (!res.ok) throw new Error(res.status);
+    lastData = await res.json();
+    render();
+    updateFailButton();
+    sync.className = "sync ok";
+    $("syncText").textContent = "Ao vivo · " + new Date().toLocaleTimeString("pt-BR");
+  } catch (e) {
+    sync.className = "sync err";
+    $("syncText").textContent = "Miner desconectado";
+  }
+}
+
+document.querySelectorAll(".filters button").forEach(b => b.addEventListener("click", () => {
+  filter = b.dataset.f;
+  document.querySelectorAll(".filters button").forEach(x => x.setAttribute("aria-pressed", x === b));
+  render();
+}));
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

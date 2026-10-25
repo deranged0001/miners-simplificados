@@ -1,6 +1,7 @@
+import os
 import threading
 import json
-from flask import Flask, render_template_string, jsonify
+from flask import Flask, render_template_string, jsonify, send_file, request
 from loguru import logger
 from datetime import datetime
 
@@ -662,6 +663,11 @@ setInterval(refresh, 5000);
 
 @app.route('/')
 def dashboard():
+    return send_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'painel.html'))
+
+
+@app.route('/antigo')
+def dashboard_old():
     return render_template_string(HTML_TEMPLATE)
 
 
@@ -739,6 +745,39 @@ def get_accounts():
     return jsonify([])
 
 
+@app.route('/api/reconnect', methods=['POST'])
+def reconnect():
+    # Exigir JSON obriga o navegador a fazer preflight CORS, então outro site não consegue disparar isto
+    if not request.is_json:
+        return jsonify({"error": "JSON obrigatório"}), 415
+    if _account_manager is None:
+        return jsonify({"error": "Miner não iniciado"}), 503
+    body = request.get_json(silent=True) or {}
+    streamers = body.get("streamers")
+    if body.get("streamer"):
+        streamers = [body["streamer"]]
+    if streamers is not None and not (
+        isinstance(streamers, list) and all(isinstance(s, str) for s in streamers)
+    ):
+        return jsonify({"error": "streamers deve ser lista de nomes"}), 400
+    count = _account_manager.request_reconnect(streamers)
+    return jsonify({"reconnecting": count})
+
+
+@app.route('/api/check', methods=['POST'])
+def check():
+    if not request.is_json:
+        return jsonify({"error": "JSON obrigatório"}), 415
+    if _account_manager is None:
+        return jsonify({"error": "Miner não iniciado"}), 503
+    try:
+        _account_manager.check_now()
+    except Exception as e:
+        logger.error(f"API /api/check error: {e}")
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"ok": True})
+
+
 def start_server(streamers_data, port=5000):
     global _account_manager
 
@@ -767,7 +806,7 @@ def start_server(streamers_data, port=5000):
         import logging
         logging.getLogger('werkzeug').setLevel(logging.ERROR)
         logger.info(f"🌍 Web Dashboard available at http://localhost:{port}")
-        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+        app.run(host='127.0.0.1', port=port, debug=False, use_reloader=False)
 
     threading.Thread(target=run, daemon=True).start()
 

@@ -1,6 +1,7 @@
 import rnet
 import json
 import asyncio
+import time
 import traceback
 import random
 from typing import Dict, Optional, Callable, Awaitable
@@ -32,6 +33,8 @@ class KickWebSocket:
         self.handshake_task: Optional[asyncio.Task] = None
         self.tracking_task: Optional[asyncio.Task] = None
         self._running = False
+        # Hora da última mensagem da Kick: prova de que a conexão está viva
+        self.last_message_at: Optional[float] = None
 
     async def connect(self) -> bool:
         if not self.data.get("token"):
@@ -138,6 +141,7 @@ class KickWebSocket:
         try:
             while self.state.is_connected and self._running:
                 message = await self.ws.recv()
+                self.last_message_at = time.time()
                 await self._handle_message(message)
         except asyncio.CancelledError:
             pass
