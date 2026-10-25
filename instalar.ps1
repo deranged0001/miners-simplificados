@@ -8,7 +8,8 @@ $Repo = $PSScriptRoot
 $TwitchDir = Join-Path $Repo "twitch\Twitch-Channel-Points-Miner-v2"
 # Versão do miner da Twitch revisada para este projeto
 $TwitchRepo = "https://github.com/rdavydov/Twitch-Channel-Points-Miner-v2"
-$TwitchCommit = "8a35f87"
+# SHA completo: um prefixo curto poderia, em tese, coincidir com outro commit
+$TwitchCommit = "8a35f87cd5345074003c7f6eedb48aedadc3b9b3"
 
 function Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Green }
 function Fail($msg) { Write-Host "`nERRO: $msg" -ForegroundColor Red; exit 1 }
@@ -55,6 +56,9 @@ if (-not (Test-Path $TwitchDir)) {
     git -C $TwitchDir -c advice.detachedHead=false checkout -q $TwitchCommit
     if ($LASTEXITCODE -ne 0) { Fail "Versao $TwitchCommit do miner da Twitch nao encontrada." }
 }
+# Confere sempre, inclusive em reinstalacao: a pasta precisa estar exatamente na versao revisada
+$Head = (git -C $TwitchDir rev-parse HEAD).Trim()
+if ($Head -ne $TwitchCommit) { Fail "O miner da Twitch esta na versao $Head, esperado $TwitchCommit. Apague a pasta $TwitchDir e rode de novo." }
 if (-not (Test-Path "$TwitchDir\.venv\Scripts\python.exe")) { PyRun -m venv "$TwitchDir\.venv" }
 & "$TwitchDir\.venv\Scripts\python.exe" -m pip install -q --disable-pip-version-check -r "$TwitchDir\requirements.txt"
 if ($LASTEXITCODE -ne 0) { Fail "pip falhou no miner da Twitch." }

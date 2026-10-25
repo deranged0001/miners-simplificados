@@ -17,6 +17,18 @@ shared_context = {
 }
 
 app = Flask(__name__)
+_port = 5000
+
+
+@app.before_request
+def _only_local():
+    # Contra DNS rebinding: um site externo que resolva para 127.0.0.1 chega com outro Host
+    allowed = {f"localhost:{_port}", f"127.0.0.1:{_port}"}
+    if request.host not in allowed:
+        return jsonify({"error": "host não permitido"}), 403
+    # O navegador manda Origin em todo POST; só o próprio painel pode acionar os botões
+    if request.method == "POST" and request.headers.get("Origin") not in {f"http://{h}" for h in allowed}:
+        return jsonify({"error": "origem não permitida"}), 403
 
 HTML_TEMPLATE = r"""
 <!DOCTYPE html>
@@ -779,7 +791,8 @@ def check():
 
 
 def start_server(streamers_data, port=5000):
-    global _account_manager
+    global _account_manager, _port
+    _port = port
 
     if hasattr(streamers_data, 'get_all_status'):
         _account_manager = streamers_data
