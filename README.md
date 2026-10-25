@@ -122,7 +122,7 @@ Para colocar um ícone próprio na janela e no atalho, salve um `miners.ico` na 
 Quem já usa Git pode clonar em vez de baixar o ZIP:
 
 ```powershell
-git clone https://github.com/SEU_USUARIO/miners-simplificados.git
+git clone https://github.com/deranged0001/miners-simplificados.git
 ```
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\miners-simplificados\instalar.ps1
