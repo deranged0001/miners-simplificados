@@ -4,6 +4,9 @@ Uma forma simples de acumular **pontos de canal** na Kick e na Twitch sem deixar
 Uma janela com dois botões (**Iniciar** e **Parar**) controla os dois miners em segundo plano, e um
 painel no navegador mostra os pontos da Kick, com o status real de cada conexão.
 
+> [!TIP]
+> **Já instalou e quer atualizar?** Veja o passo a passo em [ATUALIZAR.md](ATUALIZAR.md).
+
 Este projeto **não criou os miners**. Ele junta e simplifica dois projetos de código aberto,
 listados em [Créditos](#créditos). Todo o trabalho pesado é dos autores originais.
 
@@ -144,7 +147,7 @@ Clique em **⟳ Atualizar** no app **Miners Kick e Twitch** (ou dê dois cliques
 Ele para os miners, baixa a versão mais nova daqui do GitHub, instala o que mudou e mantém
 a sua configuração, o token da Kick e o login da Twitch. No fim, feche o app, abra de novo e clique em **Iniciar**.
 
-**Instalou antes de existir o botão Atualizar?** Faça isto uma vez:
+**Instalou antes de existir o botão Atualizar?** Siga o [passo a passo em ATUALIZAR.md](ATUALIZAR.md), ou em resumo:
 
 1. Clique em **Parar** no app e feche o app.
 2. Baixe o ZIP novo (**Code → Download ZIP**) e abra.
