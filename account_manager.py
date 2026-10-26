@@ -290,6 +290,11 @@ class AccountWorker:
                     f"окончательно отключился"
                 )
 
+            def refresh_token():
+                # A live pode ter reiniciado com outro stream_id enquanto estava caída
+                ws_client.data["streamId"] = st.stream_id or 0
+                return ws_token_getter.get_ws_token(name)
+
             ws_client = KickWebSocket(
                 data={
                     "token": ws_token,
@@ -298,6 +303,7 @@ class AccountWorker:
                 },
                 proxy=self.proxy,
                 on_disconnect=on_disconnect,
+                token_refresher=refresh_token,
             )
 
             st.ws_client = ws_client

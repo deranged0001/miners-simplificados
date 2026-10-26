@@ -24,11 +24,14 @@ class KickWebSocket:
         data: Dict[str, str],
         proxy: Optional[str] = None,
         on_disconnect: Optional[Callable[[], Awaitable]] = None,
+        token_refresher: Optional[Callable[[], Optional[str]]] = None,
     ):
         self.ws: Optional[WebSocket] = None
         self.data = data
         self.proxy = proxy
         self.on_disconnect = on_disconnect
+        # O token do WS é de uso único: reconectar com o antigo dá 403 Forbidden
+        self.token_refresher = token_refresher
         self.state = ConnectionState()
         self.handshake_task: Optional[asyncio.Task] = None
         self.tracking_task: Optional[asyncio.Task] = None
@@ -235,6 +238,15 @@ class KickWebSocket:
             )
             logger.info(f"Reconnect delay: {delay}s")
             await asyncio.sleep(delay)
+            if self.token_refresher:
+                try:
+                    token = self.token_refresher()
+                    if token:
+                        self.data["token"] = token
+                    else:
+                        logger.warning("Não veio WS-token novo; tentando com o anterior")
+                except Exception as e:
+                    logger.warning(f"Falha ao pegar WS-token novo: {e}")
             await self.connect()
         else:
             logger.error(t("max_reconnection_attempts"))
