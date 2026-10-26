@@ -1,7 +1,7 @@
 import asyncio
 import random
 from datetime import datetime
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 from dataclasses import dataclass, field
 from loguru import logger
 
@@ -9,6 +9,7 @@ from _websockets.ws_token import KickPoints
 from _websockets.ws_connect import KickWebSocket
 from utils.kick_utility import KickUtility
 from utils.get_points_amount import PointsAmount
+from utils.channel_rewards import ChannelRewards, RedeemError
 
 if TYPE_CHECKING:
     from discord_webhook import DiscordWebhook
@@ -616,6 +617,28 @@ class AccountManager:
         ]
         for fut in futs:
             fut.result(timeout=timeout)
+
+    def _rewards_for(self, channel: str) -> Tuple["AccountWorker", ChannelRewards]:
+        """Conta que minera o canal. Só canais da config: o painel não consulta canais arbitrários."""
+        for w in self.workers:
+            if channel in w.state.streamers:
+                if not hasattr(w, "_rewards"):
+                    w._rewards = ChannelRewards(w.token, proxy=w.proxy)
+                return w, w._rewards
+        raise RedeemError("canal não está na configuração")
+
+    def list_rewards(self, channel: str) -> dict:
+        """Chamado pela thread do painel."""
+        return self._rewards_for(channel)[1].list(channel)
+
+    def redeem_reward(self, channel: str, reward_id: str) -> dict:
+        """Chamado pela thread do painel. Gasta pontos de verdade."""
+        w, rewards = self._rewards_for(channel)
+        result = rewards.redeem(channel, reward_id)
+        logger.info(f"[{w.alias}] 🎁 {channel}: resgatou '{result['title']}' por {result['cost']} pontos")
+        if result["points"] is not None:
+            w.state.streamers[channel].points = result["points"]
+        return result
 
     def get_all_streamers_flat(self) -> List[str]:
         seen = set()

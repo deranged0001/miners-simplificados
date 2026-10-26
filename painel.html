@@ -100,6 +100,36 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 .meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
 .meta .warn { color: var(--amber); }
 
+dialog {
+  background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 20px; width: min(520px, calc(100vw - 32px)); margin: auto;
+}
+dialog::backdrop { background: rgba(0,0,0,.6); }
+dialog h3 { font-size: 17px; margin-bottom: 4px; }
+dialog .hint { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+dialog select {
+  width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; font: inherit; margin-bottom: 12px;
+}
+dialog select:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.balance { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+.balance b { color: var(--green); font-size: 16px; }
+.rewards { display: flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow-y: auto; }
+.reward {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--bg); border-left-width: 4px;
+}
+.reward .info { flex: 1; min-width: 0; }
+.reward .info b { display: block; font-size: 14px; }
+.reward .info small { color: var(--muted); font-size: 12px; display: block; }
+.reward .btn { font-size: 13px; padding: 7px 12px; white-space: nowrap; font-weight: 600; }
+.reward .btn.go { background: var(--green); color: #000; border-color: var(--green); }
+.reward .btn.go:hover:not(:disabled) { color: #000; filter: brightness(1.1); }
+#rdMsg { margin-top: 12px; font-size: 13px; min-height: 18px; }
+#rdMsg.ok { color: var(--green); }
+#rdMsg.err { color: var(--red); }
+.dlg-foot { display: flex; justify-content: flex-end; margin-top: 12px; }
+
 .empty { color: var(--muted); text-align: center; padding: 48px 16px; border: 1px dashed var(--line); border-radius: var(--radius); }
 
 @media (max-width: 760px) {
@@ -142,11 +172,23 @@ header { display: flex; align-items: center; justify-content: space-between; gap
       <button class="btn" id="chk">✓ Verificar status</button>
       <button class="btn" id="reFail" disabled>↻ Reconectar falhas</button>
       <button class="btn" id="reAll">↻ Reconectar todos</button>
+      <button class="btn" id="rdOpen">🎁 Resgatar</button>
     </div>
   </div>
   <p class="alive" id="msg" role="status" style="margin:-4px 0 12px"></p>
   <div class="grid" id="grid"></div>
 </div>
+
+<dialog id="rd" aria-labelledby="rdTitle">
+  <h3 id="rdTitle">Resgatar recompensa</h3>
+  <p class="hint">Gasta pontos de verdade, sem volta. Escolha de qual canal sairão os pontos.</p>
+  <label for="rdChan" class="hint" style="display:block;margin-bottom:4px">Canal</label>
+  <select id="rdChan"></select>
+  <div class="balance" id="rdBal"></div>
+  <div class="rewards" id="rdList"></div>
+  <p id="rdMsg" role="status"></p>
+  <div class="dlg-foot"><button class="btn" id="rdClose">Fechar</button></div>
+</dialog>
 
 <script>
 const fmt = n => Number(n || 0).toLocaleString("pt-BR");
@@ -382,6 +424,106 @@ $("chk").addEventListener("click", async e => {
   btn.disabled = false;
   btn.textContent = "✓ Verificar status";
 });
+
+// Resgate: a lista vem da Kick na hora, porque cada canal tem as suas recompensas
+let rdBalance = null;
+let rdBusy = false;
+
+function rdStatus(text, kind = "") {
+  $("rdMsg").textContent = text;
+  $("rdMsg").className = kind;
+}
+
+async function rdLoad() {
+  const channel = $("rdChan").value;
+  $("rdList").replaceChildren();
+  $("rdBal").textContent = "Carregando recompensas…";
+  rdStatus("");
+  try {
+    const res = await fetch("/api/rewards?channel=" + encodeURIComponent(channel), { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.status);
+    if (channel !== $("rdChan").value) return;  // trocou de canal no meio
+    rdBalance = data.points;
+    $("rdBal").innerHTML = rdBalance === null ? "Saldo indisponível" : "Saldo: <b></b> pontos";
+    if (rdBalance !== null) $("rdBal").querySelector("b").textContent = fmt(rdBalance);
+    if (!data.rewards.length) {
+      $("rdList").innerHTML = '<p class="hint">Este canal não tem recompensas ativas.</p>';
+      return;
+    }
+    $("rdList").replaceChildren(...data.rewards.map(r => rdRow(channel, r)));
+  } catch (e) {
+    $("rdBal").textContent = "";
+    rdStatus("Não foi possível carregar: " + e.message, "err");
+  }
+}
+
+function rdRow(channel, r) {
+  const row = document.createElement("div");
+  row.className = "reward";
+  row.style.borderLeftColor = /^#[0-9a-f]{3,8}$/i.test(r.color) ? r.color : "var(--line)";
+  row.innerHTML = '<div class="info"><b></b><small></small></div><button class="btn"></button>';
+  // Títulos e descrições vêm do canal: textContent evita injetar HTML
+  row.querySelector("b").textContent = r.title;
+  row.querySelector("small").textContent = r.description;
+  const btn = row.querySelector("button");
+  const short = rdBalance !== null && rdBalance < r.cost;
+  btn.textContent = fmt(r.cost) + " pts";
+  if (r.paused || r.needs_input || short) {
+    btn.disabled = true;
+    btn.title = r.paused ? "Pausada pelo canal" : r.needs_input ? "Pede texto: resgate pelo site da Kick" : `Faltam ${fmt(r.cost - rdBalance)} pontos`;
+  } else {
+    btn.classList.add("go");
+    btn.addEventListener("click", () => rdRedeem(channel, r, btn));
+  }
+  return row;
+}
+
+async function rdRedeem(channel, r, btn) {
+  if (rdBusy) return;
+  if (!confirm(`Gastar ${fmt(r.cost)} pontos de ${channel} em "${r.title}"?`)) return;
+  rdBusy = true;
+  document.querySelectorAll("#rdList button").forEach(b => b.disabled = true);
+  btn.textContent = "Resgatando…";
+  rdStatus("");
+  let ok = false;
+  try {
+    const res = await fetch("/api/redeem", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel, reward_id: r.id }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.status);
+    ok = true;
+    rdStatus(`Resgatado: ${data.title}` + (data.points !== null ? ` · saldo agora ${fmt(data.points)}` : ""), "ok");
+  } catch (e) {
+    rdStatus("Resgate falhou: " + e.message, "err");
+  }
+  rdBusy = false;
+  const msg = [$("rdMsg").textContent, $("rdMsg").className];
+  await rdLoad();
+  rdStatus(...msg);
+  if (ok) refresh();
+}
+
+$("rdOpen").addEventListener("click", () => {
+  const sel = $("rdChan");
+  const prev = sel.value;
+  const all = lastData ? rows(lastData) : [];
+  sel.replaceChildren(...all.sort((a, b) => (b.points || 0) - (a.points || 0)).map(r => {
+    const o = document.createElement("option");
+    o.value = r.name;
+    // Logo depois de iniciar o miner ainda não leu os saldos; o saldo exato vem ao escolher o canal
+    o.textContent = r.points ? `${r.name} · ${fmt(r.points)} pts` : r.name;
+    return o;
+  }));
+  if (prev && all.some(r => r.name === prev)) sel.value = prev;
+  $("rd").showModal();
+  if (sel.value) rdLoad();
+});
+$("rdChan").addEventListener("change", rdLoad);
+$("rdClose").addEventListener("click", () => $("rd").close());
 
 async function refresh() {
   const sync = $("sync");

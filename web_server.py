@@ -4,6 +4,7 @@ import json
 from flask import Flask, render_template_string, jsonify, send_file, request
 from loguru import logger
 from datetime import datetime
+from utils.channel_rewards import RedeemError
 
 data_lock = threading.Lock()
 _account_manager = None
@@ -788,6 +789,40 @@ def check():
         logger.error(f"API /api/check error: {e}")
         return jsonify({"error": str(e)}), 500
     return jsonify({"ok": True})
+
+
+@app.route('/api/rewards')
+def rewards():
+    if _account_manager is None:
+        return jsonify({"error": "Miner não iniciado"}), 503
+    channel = request.args.get("channel", "")
+    try:
+        return jsonify(_account_manager.list_rewards(channel))
+    except RedeemError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"API /api/rewards error: {e}")
+        return jsonify({"error": "falha ao consultar a Kick"}), 502
+
+
+@app.route('/api/redeem', methods=['POST'])
+def redeem():
+    # Gasta pontos: JSON obrigatório (preflight CORS) além da checagem de Origin
+    if not request.is_json:
+        return jsonify({"error": "JSON obrigatório"}), 415
+    if _account_manager is None:
+        return jsonify({"error": "Miner não iniciado"}), 503
+    body = request.get_json(silent=True) or {}
+    channel, reward_id = body.get("channel"), body.get("reward_id")
+    if not (isinstance(channel, str) and isinstance(reward_id, str) and reward_id):
+        return jsonify({"error": "channel e reward_id obrigatórios"}), 400
+    try:
+        return jsonify(_account_manager.redeem_reward(channel, reward_id))
+    except RedeemError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"API /api/redeem error: {e}")
+        return jsonify({"error": "falha ao falar com a Kick"}), 502
 
 
 def start_server(streamers_data, port=5000):
