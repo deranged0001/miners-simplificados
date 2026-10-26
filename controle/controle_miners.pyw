@@ -234,6 +234,8 @@ class App(tk.Tk):
         self._button(extra, "Login da Twitch", CARD, TEXT, self.on_login).pack(
             side="left", expand=True, fill="x", padx=(4, 0))
 
+        self._button(self, "⟳  Atualizar", CARD, MUTED, self.on_update).pack(fill="x", pady=(8, 0))
+
         self.msg = tk.Label(self, text="", bg=BG, fg=MUTED, font=("Segoe UI", 9),
                             wraplength=280, justify="left")
         self.msg.pack(anchor="w", pady=(10, 0))
@@ -310,6 +312,18 @@ class App(tk.Tk):
         else:
             open_twitch_login()
             self.msg.config(text="Siga as instruções na janela preta que abriu.")
+
+    def on_update(self):
+        if not messagebox.askyesno(
+            "Atualizar",
+            "Baixar a versão mais nova do GitHub?\n\nOs miners param durante a atualização. "
+            "Sua configuração e o login da Twitch são mantidos.",
+            parent=self,
+        ):
+            return
+        subprocess.Popen(["cmd", "/c", str(REPO / "atualizar.bat")], cwd=REPO,
+                         creationflags=subprocess.CREATE_NEW_CONSOLE)
+        self.msg.config(text="Atualizando na janela preta. Quando terminar, feche e abra este app de novo.")
 
     def on_config(self):
         ConfigWindow(self)

@@ -138,6 +138,23 @@ Cada miner grava o que mostraria no terminal em um arquivo, recriado a cada iní
 
 Se o login da Twitch expirar, o status mostra **falta o login**: clique em **Login da Twitch** de novo.
 
+## Atualizar
+
+Clique em **⟳ Atualizar** no app **Miners Kick e Twitch** (ou dê dois cliques no `atualizar.bat`).
+Ele para os miners, baixa a versão mais nova daqui do GitHub, instala o que mudou e mantém
+a sua configuração, o token da Kick e o login da Twitch. No fim, feche o app, abra de novo e clique em **Iniciar**.
+
+**Instalou antes de existir o botão Atualizar?** Faça isto uma vez:
+
+1. Clique em **Parar** no app e feche o app.
+2. Baixe o ZIP novo (**Code → Download ZIP**) e abra.
+3. Copie tudo o que está dentro da pasta `miners-simplificados-main` do ZIP para a sua pasta atual, por cima.
+   Quando o Windows perguntar, escolha **Substituir os arquivos no destino**.
+   Sua configuração não está no ZIP, então ela não é apagada.
+4. Dê dois cliques no `instalar.bat`.
+
+Das próximas vezes, é só o botão **⟳ Atualizar**.
+
 ## Segurança
 
 - **O `config.json` tem o seu token da Kick**, o `config_twitch.json` tem o seu usuário da Twitch, e a pasta `twitch/.../cookies/` tem o seu login da Twitch. Quem tiver esses arquivos consegue agir na sua conta. Não compartilhe e não publique esses arquivos. O `.gitignore` já os exclui.
@@ -155,5 +172,5 @@ Se o login da Twitch expirar, o status mostra **falta o login**: clique em **Log
 ## Licença
 
 - O código do miner da Kick e as mudanças deste fork estão sob a licença **MIT**: veja [LICENSE](LICENSE), com o copyright original mantido.
-- `controle/`, `instalar.bat` e `instalar.ps1` também estão sob a licença MIT.
+- `controle/`, `instalar.bat`, `instalar.ps1`, `atualizar.bat` e `atualizar.ps1` também estão sob a licença MIT.
 - `twitch/run.example.py` e `twitch/login_twitch.py` usam o projeto da Twitch e estão sob a **GPL-3.0**: veja [twitch/LICENSE-GPL-3.0.md](twitch/LICENSE-GPL-3.0.md).

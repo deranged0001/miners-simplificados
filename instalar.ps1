@@ -84,8 +84,8 @@ if ($Head -ne $TwitchCommit) { Fail "O miner da Twitch esta na versao $Head, esp
 if (-not (Test-Path "$TwitchDir\.venv\Scripts\python.exe")) { PyRun -m venv "$TwitchDir\.venv" }
 & "$TwitchDir\.venv\Scripts\python.exe" -m pip install -q --disable-pip-version-check -r "$TwitchDir\requirements.txt"
 if ($LASTEXITCODE -ne 0) { Fail "pip falhou no miner da Twitch." }
-if (-not (Test-Path "$TwitchDir\run.py")) { Copy-Item "$Repo\twitch\run.example.py" "$TwitchDir\run.py" }
-# Script de login é nosso: sempre atualiza
+# run.py e o script de login são nossos e sempre atualizam; usuário e canais ficam no config_twitch.json
+Copy-Item "$Repo\twitch\run.example.py" "$TwitchDir\run.py" -Force
 Copy-Item "$Repo\twitch\login_twitch.py" "$TwitchDir\login_twitch.py" -Force
 
 # 4. Atalho na Área de Trabalho, abrindo a janela de controle sem console
