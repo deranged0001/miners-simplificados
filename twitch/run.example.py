@@ -9,10 +9,14 @@
 # Usuário e canais ficam no config_twitch.json ao lado, preenchido pelo botão "Configurar".
 
 import json
+import logging
 import sys
+import threading
+import time
 from pathlib import Path
 
 from TwitchChannelPointsMiner import TwitchChannelPointsMiner
+from TwitchChannelPointsMiner.classes.Chat import ChatPresence
 from TwitchChannelPointsMiner.classes.entities.Streamer import Streamer, StreamerSettings
 
 config_file = Path(__file__).with_name("config_twitch.json")
@@ -32,6 +36,55 @@ twitch_miner = TwitchChannelPointsMiner(
         watch_streak=True,
     ),
 )
+
+
+def chat_ok(streamer):
+    """Conectado ao chat da Twitch e dentro do canal."""
+    t = streamer.irc_chat
+    bot = getattr(t, "chat_irc", None)
+    if not (t and t.is_alive() and bot):
+        return False
+    return bot.connection.is_connected() and f"#{streamer.username}" in bot.channels
+
+
+def chat_watchdog(miner, interval=60):
+    """A conexão de chat da Twitch às vezes cai sem aviso e o miner não volta sozinho.
+    Jogos que contam quem está no chat deixam de ver você. Isto confere a cada minuto
+    e reconecta o chat dos canais ao vivo que caíram."""
+    log = logging.getLogger("chat_watchdog")
+    strikes = {}
+    keepalive = set()
+    while True:
+        time.sleep(interval)
+        try:
+            check_chats(miner, log, strikes, keepalive)
+        except Exception as e:
+            log.error(f"Watchdog do chat falhou nesta rodada: {e}")
+
+
+def check_chats(miner, log, strikes, keepalive):
+    for s in list(miner.streamers):
+        if not (s.is_online and s.settings.chat == ChatPresence.ONLINE and s.irc_chat):
+            strikes.pop(s.username, None)
+            continue
+        if chat_ok(s):
+            strikes.pop(s.username, None)
+            conn = s.irc_chat.chat_irc.connection
+            if id(conn) not in keepalive:
+                # PING periódico: uma conexão morta sem aviso passa a dar erro e a ser detectada
+                conn.set_keepalive(60)
+                keepalive.add(id(conn))
+            continue
+        # Duas checagens seguidas, para não atrapalhar a entrada normal no chat
+        strikes[s.username] = strikes.get(s.username, 0) + 1
+        if strikes[s.username] >= 2:
+            log.warning(f"Chat de {s.username} caiu; reconectando")
+            s.leave_chat()
+            s.toggle_chat()
+            strikes.pop(s.username, None)
+
+
+threading.Thread(target=chat_watchdog, args=(twitch_miner,), daemon=True).start()
 
 twitch_miner.mine(
     # Nome do canal como aparece em twitch.tv/<nome>. A ordem é a prioridade.
