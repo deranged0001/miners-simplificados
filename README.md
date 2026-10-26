@@ -65,6 +65,7 @@ Pode rodar o `instalar.bat` de novo sem problema: o que já existe é mantido, i
 ## Configuração
 
 Tudo é feito pelo botão **⚙ Configurar**. Ele grava os arquivos para você.
+Ao salvar, o app reinicia sozinho só o miner que mudou (Kick ou Twitch), e os canais novos já começam a ser assistidos.
 
 ### Kick
 
@@ -117,7 +118,7 @@ Abra o atalho **Miners Kick e Twitch**:
 
 O status de cada miner aparece na janela: **rodando**, **parado**, **falta configurar**, **falta o login** ou **não instalado**.
 
-Fechar a janela **não** para os miners. Use o botão Parar. Mudou a configuração com os miners rodando? Clique em Parar e depois em Iniciar.
+Fechar a janela **não** para os miners. Use o botão Parar. Mudou a configuração? O app reinicia o miner certo sozinho ao salvar.
 
 Para colocar um ícone próprio na janela e no atalho, salve um `miners.ico` na pasta `controle` e rode o `instalar.bat` de novo.
 

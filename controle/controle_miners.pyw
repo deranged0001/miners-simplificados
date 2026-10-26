@@ -328,6 +328,22 @@ class App(tk.Tk):
     def on_config(self):
         ConfigWindow(self)
 
+    def apply_config(self, names, msg):
+        """Reinicia só os miners cuja configuração mudou, para os canais novos já entrarem."""
+        self.msg.config(text=msg + " Aplicando…")
+
+        def work():
+            pids = running_pids()
+            for name in names:
+                stop_pids(pids[name])
+            threading.Event().wait(2)
+            for name in names:
+                if ready(name):
+                    start_miner(name)
+
+        restarted = [n for n in names if ready(n)]
+        self.run_bg(work, msg + (f" {' e '.join(restarted)} reiniciado(s) com a lista nova." if restarted else ""))
+
     def refresh(self, schedule=True):
         def task():
             pids = running_pids()
@@ -439,6 +455,7 @@ class ConfigWindow(tk.Toplevel):
             messagebox.showerror("Configurar", "\n\n".join(problems), parent=self)
             return
 
+        old = {"Kick": kick_settings(), "Twitch": twitch_settings()}
         try:
             if token:
                 save_kick(token, kick_channels)
@@ -448,14 +465,17 @@ class ConfigWindow(tk.Toplevel):
             messagebox.showerror("Configurar", f"Não foi possível salvar: {e}", parent=self)
             return
 
-        msg = "Configuração salva."
-        if any(running_pids().values()):
-            msg += " Clique em Parar e depois em Iniciar para aplicar."
-        elif user and not twitch_logged_in():
-            msg += " Agora clique em Login da Twitch."
-        self.app.msg.config(text=msg)
-        self.app.refresh(schedule=False)
+        new = {"Kick": kick_settings(), "Twitch": twitch_settings()}
+        changed = [name for name in MINERS if new[name] != old[name] and new[name][0]]
+        added = [f"{c} ({name})" for name in changed for c in new[name][1] if c not in old[name][1]]
         self.destroy()
+        if not changed:
+            self.app.msg.config(text="Nada mudou na configuração.")
+            return
+        msg = "Salvo" + (f": {', '.join(added)} adicionado(s)" if added else "") + "."
+        if "Twitch" in changed and not twitch_logged_in():
+            msg += " Clique em Login da Twitch para minerar a Twitch."
+        self.app.apply_config(changed, msg)
 
 
 if __name__ == "__main__":
