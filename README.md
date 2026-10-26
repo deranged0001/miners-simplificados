@@ -28,6 +28,7 @@ Em relação ao miner da Kick original (commit `c5e5053`):
 - **Painel novo** (`painel.html`, em `http://localhost:5000`): pontos totais e por canal, ganho na sessão, contagem regressiva até a próxima leitura e filtros. O painel antigo continua em `/antigo`.
 - **Status confirmado:** um canal só aparece como "Assistindo" se a Kick respondeu na conexão nos últimos 90 segundos. Os outros estados são "Conectando", "Reconectando", "Sem resposta", "Ao vivo" e "Offline" (`_websockets/ws_connect.py`, `account_manager.py`).
 - **Botões no painel:** "Verificar status" (pergunta agora para a Kick quem está ao vivo), "Reconectar falhas" (só os canais com problema, usando um token de conexão novo) e "Reconectar todos".
+- **Resgatar recompensas pelo painel** (botão "🎁 Resgatar"): você escolhe o canal de onde saem os pontos, vê as recompensas ativas daquele canal e resgata com um clique, com confirmação antes. O painel confere de novo o saldo e a recompensa antes de gastar. Recompensas que pedem texto continuam só pelo site. Usa a mesma rota interna do site da Kick, que não é documentada e pode mudar (`utils/channel_rewards.py`).
 - **Pontos lidos a cada 10 minutos**, o intervalo em que a Kick credita pontos. O original lia a cada 2 a 3 minutos.
 - **Painel acessível só neste PC** (`127.0.0.1`). O original abria a porta 5000 para toda a rede local, sem senha.
 - **Janela de controle** (`controle/controle_miners.pyw`): inicia e para os dois miners sem abrir terminais e mostra se cada um está rodando.
