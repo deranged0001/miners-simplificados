@@ -1,12 +1,18 @@
 # Janela simples para iniciar e parar os miners da Kick e da Twitch em segundo plano.
 # Roda com pythonw (sem console). Os miners continuam rodando mesmo se esta janela for fechada.
+#
+# Com "--guardiao" este mesmo arquivo vira o vigia: um processo escondido, aberto pelo
+# Iniciar, que reinicia um miner que parou ou cujo log da Twitch travou. Ele também
+# continua rodando com a janela fechada e sai sozinho depois do Parar ou do Atualizar.
 
 import ctypes
 import json
 import re
 import shutil
 import subprocess
+import sys
 import threading
+import time
 import urllib.request
 import webbrowser
 import tkinter as tk
@@ -35,6 +41,14 @@ PAINEL = "http://localhost:5000"
 NO_WINDOW = subprocess.CREATE_NO_WINDOW
 KICK_CONFIG = REPO / "config.json"
 TWITCH_CONFIG = MINERS["Twitch"]["dir"] / "config_twitch.json"
+
+# Vigia: o arquivo .guardiao existe enquanto ele deve rodar (o Iniciar cria; Parar e Atualizar apagam)
+GUARD_FLAG = Path(__file__).with_name(".guardiao")
+GUARD_LOG = Path(__file__).with_name("guardiao-log.txt")
+GUARD_MUTEX = "Local\\miners_kick_twitch_guardiao"
+GUARD_INTERVAL = 60       # segundos entre as checagens
+TWITCH_STALL = 10 * 60    # log da Twitch parado por este tempo = miner travado
+RESTART_GAP = 10 * 60     # tempo mínimo entre dois reinícios do mesmo miner
 
 BG, CARD, TEXT, MUTED = "#0b0d0c", "#131715", "#e9efeb", "#8a968f"
 GREEN, RED, AMBER = "#53fc18", "#ff5a5f", "#ffb547"
@@ -188,6 +202,122 @@ def painel_up():
         return False
 
 
+# ---------------------------------------------------------------- vigia
+
+def guard_running():
+    """O mutex com nome só existe enquanto um vigia está vivo."""
+    k32 = ctypes.windll.kernel32
+    k32.OpenMutexW.restype = ctypes.c_void_p
+    handle = k32.OpenMutexW(0x00100000, False, GUARD_MUTEX)  # SYNCHRONIZE
+    if handle:
+        k32.CloseHandle(handle)
+        return True
+    return False
+
+
+def start_guard():
+    GUARD_FLAG.write_text("ligado", encoding="utf-8")
+    if not guard_running():
+        subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), "--guardiao"],
+            cwd=Path(__file__).parent, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=NO_WINDOW,
+        )
+
+
+def stop_guard():
+    """O vigia confere o arquivo a cada minuto e sai quando ele some."""
+    GUARD_FLAG.unlink(missing_ok=True)
+
+
+def guard_log(text):
+    try:
+        if GUARD_LOG.exists() and GUARD_LOG.stat().st_size > 1_000_000:
+            GUARD_LOG.write_text("", encoding="utf-8")  # não deixa crescer para sempre
+        with open(GUARD_LOG, "a", encoding="utf-8") as f:
+            f.write(time.strftime("%d/%m %H:%M:%S ") + text + "\n")
+    except OSError:
+        pass
+
+
+def twitch_log_file():
+    """O log completo do miner (nível DEBUG) é escrito a cada poucos segundos,
+    mesmo sem canal ao vivo; o miner-log.txt pode ficar minutos sem nada."""
+    user = twitch_settings()[0]
+    full = MINERS["Twitch"]["dir"] / "logs" / f"{user}.log"
+    return full if user and full.exists() else MINERS["Twitch"]["dir"] / MINERS["Twitch"]["out"]
+
+
+def file_mark(path):
+    try:
+        st = path.stat()
+        return st.st_size, st.st_mtime
+    except OSError:
+        return None
+
+
+class Guard:
+    """Uma rodada por minuto. Separado do loop para dar para testar."""
+
+    def __init__(self, now):
+        self.missing = {name: 0 for name in MINERS}
+        self.last_restart = {name: now for name in MINERS}  # carência logo após abrir
+        self.log_mark = None
+        self.log_changed = now
+
+    def restart(self, name, pids, reason, now):
+        guard_log(f"{name}: {reason}; reiniciando.")
+        stop_pids(pids)
+        time.sleep(3)
+        start_miner(name)
+        self.last_restart[name] = now
+        self.missing[name] = 0
+        if name == "Twitch":
+            self.log_mark, self.log_changed = None, now
+
+    def check(self, now):
+        pids = running_pids()
+        for name in MINERS:
+            if not ready(name):
+                continue
+            recent = now - self.last_restart[name] < RESTART_GAP
+            if not pids[name]:
+                # Duas rodadas seguidas, para não brigar com o Configurar (para e inicia em 2 s)
+                self.missing[name] += 1
+                if self.missing[name] >= 2 and not recent:
+                    self.restart(name, [], "não estava rodando", now)
+                continue
+            self.missing[name] = 0
+            if name != "Twitch":
+                continue
+            mark = file_mark(twitch_log_file())
+            if mark != self.log_mark:
+                self.log_mark, self.log_changed = mark, now
+            elif now - self.log_changed >= TWITCH_STALL and not recent:
+                minutes = int((now - self.log_changed) // 60)
+                self.restart(name, pids[name], f"log parado há {minutes} min", now)
+
+
+def run_guard():
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateMutexW.restype = ctypes.c_void_p
+    k32.CloseHandle.argtypes = [ctypes.c_void_p]
+    mutex = k32.CreateMutexW(None, False, GUARD_MUTEX)
+    if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS: já tem um vigia
+        return
+    guard_log("Vigia ligado.")
+    guard = Guard(time.time())
+    while GUARD_FLAG.exists():
+        try:
+            guard.check(time.time())
+        except Exception as e:
+            guard_log(f"Erro na checagem: {e}")
+        time.sleep(GUARD_INTERVAL)
+    guard_log("Vigia desligado.")
+    k32.CloseHandle(mutex)
+
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -216,6 +346,9 @@ class App(tk.Tk):
             lbl.pack(side="right")
             self.status[name] = lbl
 
+        self.guard_lbl = tk.Label(self, text="", bg=BG, fg=MUTED, font=("Segoe UI", 9))
+        self.guard_lbl.pack(anchor="w", pady=(4, 0))
+
         btns = tk.Frame(self, bg=BG)
         btns.pack(fill="x", pady=(14, 0))
         self.btn_start = self._button(btns, "▶  Iniciar", GREEN, "#000", self.on_start)
@@ -240,6 +373,9 @@ class App(tk.Tk):
                             wraplength=280, justify="left")
         self.msg.pack(anchor="w", pady=(10, 0))
 
+        # Volta a ligar o vigia se o último clique foi Iniciar (ex.: o PC reiniciou)
+        if GUARD_FLAG.exists():
+            start_guard()
         self.refresh()
 
     def _button(self, parent, text, bg, fg, cmd):
@@ -283,6 +419,7 @@ class App(tk.Tk):
             for name in MINERS:
                 if ready(name) and not pids[name]:
                     start_miner(name)
+            start_guard()
             if not ready("Kick"):
                 return
             # O painel sobe em ~1 s; espera até 20 s antes de abrir o navegador
@@ -299,6 +436,7 @@ class App(tk.Tk):
         self.msg.config(text="Parando…")
 
         def work():
+            stop_guard()  # antes de parar, senão o vigia inicia de novo
             for pids in running_pids().values():
                 stop_pids(pids)
 
@@ -321,6 +459,7 @@ class App(tk.Tk):
             parent=self,
         ):
             return
+        stop_guard()  # o vigia não pode reabrir os miners no meio da atualização
         subprocess.Popen(["cmd", "/c", str(REPO / "atualizar.bat")], cwd=REPO,
                          creationflags=subprocess.CREATE_NEW_CONSOLE)
         self.msg.config(text="Atualizando na janela preta. Quando terminar, feche e abra este app de novo.")
@@ -347,13 +486,19 @@ class App(tk.Tk):
     def refresh(self, schedule=True):
         def task():
             pids = running_pids()
-            self.after(0, lambda: self._show(pids))
+            guard = guard_running()
+            self.after(0, lambda: self._show(pids, guard))
 
         threading.Thread(target=task, daemon=True).start()
         if schedule:
             self.after(5000, self.refresh)
 
-    def _show(self, pids):
+    def _show(self, pids, guard):
+        self.guard_lbl.config(
+            text="Vigia ligado: reinicia sozinho um miner que parar ou travar." if guard
+            else "Vigia desligado: ele liga ao clicar em Iniciar.",
+            fg=GREEN if guard else MUTED,
+        )
         for name, lbl in self.status.items():
             if pids[name]:
                 lbl.config(text="● rodando", fg=GREEN)
@@ -479,6 +624,9 @@ class ConfigWindow(tk.Toplevel):
 
 
 if __name__ == "__main__":
+    if "--guardiao" in sys.argv:
+        run_guard()
+        sys.exit()
     # Sem isto a barra de tarefas agrupa a janela sob o ícone do pythonw
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("miners.kick.twitch")
     App().mainloop()

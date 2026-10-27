@@ -27,6 +27,8 @@ if ($Current -eq $Latest) {
 
 # Os miners precisam reiniciar para usar o código novo
 Step "Parando os miners"
+# Desliga o vigia do app de controle, senão ele reabre os miners no meio da cópia
+Remove-Item (Join-Path $Repo "controle\.guardiao") -ErrorAction SilentlyContinue
 $Venvs = @("$Repo\.venv", "$Repo\twitch\Twitch-Channel-Points-Miner-v2\.venv") | ForEach-Object { $_.ToLower() }
 Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object {
     $p = "$($_.ExecutablePath)".ToLower()

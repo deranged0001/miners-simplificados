@@ -120,6 +120,8 @@ O status de cada miner aparece na janela: **rodando**, **parado**, **falta confi
 
 Fechar a janela **não** para os miners. Use o botão Parar. Mudou a configuração? O app reinicia o miner certo sozinho ao salvar.
 
+O **Iniciar** também liga um vigia escondido. A cada minuto ele confere os miners: se um parou, ou se o log da Twitch ficou 10 minutos sem novidade, ele reinicia esse miner. Cada reinício fica anotado em `controle\guardiao-log.txt`. O Parar e o Atualizar desligam o vigia.
+
 Para colocar um ícone próprio na janela e no atalho, salve um `miners.ico` na pasta `controle` e rode o `instalar.bat` de novo.
 
 ### Instalação pelo terminal (opcional)

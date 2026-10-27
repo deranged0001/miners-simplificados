@@ -46,3 +46,7 @@ twitch/Twitch-Channel-Points-Miner-v2/
 
 # 🔹 Commit instalado pelo atualizar.ps1
 .atualizacao
+
+# 🔹 Vigia do app de controle
+controle/.guardiao
+controle/guardiao-log.txt
