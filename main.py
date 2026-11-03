@@ -87,6 +87,13 @@ async def main():
         asyncio.create_task(log_memory_usage(interval=60))
         logger.info("📊 Memory Monitor: ЗАПУЩЕН")
 
+    auto_cfg = config.get("AutoRedeem", {})
+    if auto_cfg.get("title"):
+        from utils.auto_redeem import AutoRedeem
+        account_manager.auto_redeem = AutoRedeem(account_manager, auto_cfg)
+        account_manager.auto_redeem.start()
+        logger.info(f"🎁 Resgate automático: {auto_cfg['title']}")
+
     # 7. Запуск всех аккаунтов
     await account_manager.start_all()
 

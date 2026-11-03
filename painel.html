@@ -173,6 +173,7 @@ dialog select:focus-visible { outline: 2px solid var(--green); outline-offset: 2
       <button class="btn" id="reFail" disabled>↻ Reconectar falhas</button>
       <button class="btn" id="reAll">↻ Reconectar todos</button>
       <button class="btn" id="rdOpen">🎁 Resgatar</button>
+      <button class="btn" id="autoBtn" hidden aria-pressed="false"></button>
     </div>
   </div>
   <p class="alive" id="msg" role="status" style="margin:-4px 0 12px"></p>
@@ -478,6 +479,36 @@ function rdRow(channel, r) {
   }
   return row;
 }
+
+const autoBtn = document.getElementById("autoBtn");
+function autoShow(a) {
+  autoBtn.hidden = !a.configured;
+  if (!a.configured) return;
+  const next = new Date(a.next_at * 1000).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  autoBtn.textContent = a.enabled ? `⏱ Resgate automático: ligado (próximo ${next})` : "⏱ Resgate automático: desligado";
+  autoBtn.style.borderColor = a.enabled ? "var(--green)" : "";
+  autoBtn.style.color = a.enabled ? "var(--green)" : "";
+  autoBtn.title = a.title;
+  autoBtn.setAttribute("aria-pressed", String(a.enabled));
+}
+async function autoLoad(options) {
+  const res = await fetch("/api/auto-redeem", options);
+  const a = await res.json();
+  if (!res.ok) throw new Error(a.error || res.status);
+  autoShow(a);
+}
+autoBtn.addEventListener("click", async () => {
+  const enable = autoBtn.getAttribute("aria-pressed") !== "true";
+  autoBtn.disabled = true;
+  try {
+    await autoLoad({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: enable }) });
+  } catch (e) {
+    document.getElementById("msg").textContent = "Não foi possível mudar o resgate automático: " + e.message;
+  }
+  autoBtn.disabled = false;
+});
+autoLoad().catch(() => {});
+setInterval(() => autoLoad().catch(() => {}), 60000);
 
 async function rdRedeem(channel, r, btn) {
   if (rdBusy) return;

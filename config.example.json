@@ -30,6 +30,14 @@
     "color_error": 15746887
   },
   
+  "AutoRedeem": {
+    "enabled": false,
+    "title": "",
+    "min_points": 300,
+    "channels_per_round": 3,
+    "hours_per_redeem": 1
+  },
+
   "Proxy": {
     "enabled": false,
     "url": "socks5://user:password@host:port"

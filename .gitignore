@@ -50,3 +50,7 @@ twitch/Twitch-Channel-Points-Miner-v2/
 # 🔹 Vigia do app de controle
 controle/.guardiao
 controle/guardiao-log.txt
+
+# 🔹 Rodízio do resgate automático
+auto_resgate.json
+auto_resgate.tmp

@@ -825,6 +825,25 @@ def redeem():
         return jsonify({"error": "falha ao falar com a Kick"}), 502
 
 
+@app.route('/api/auto-redeem', methods=['GET', 'POST'])
+def auto_redeem():
+    auto = getattr(_account_manager, "auto_redeem", None)
+    if auto is None:
+        return jsonify({"configured": False})
+    if request.method == 'POST':
+        if not request.is_json:
+            return jsonify({"error": "JSON obrigatório"}), 415
+        enabled = (request.get_json(silent=True) or {}).get("enabled")
+        if not isinstance(enabled, bool):
+            return jsonify({"error": "enabled obrigatório"}), 400
+        try:
+            auto.set_enabled(enabled)
+        except (OSError, ValueError, KeyError) as e:
+            logger.error(f"API /api/auto-redeem error: {e}")
+            return jsonify({"error": "não foi possível salvar"}), 500
+    return jsonify({"configured": True, **auto.status()})
+
+
 def start_server(streamers_data, port=5000):
     global _account_manager, _port
     _port = port
