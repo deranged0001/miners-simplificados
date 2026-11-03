@@ -11,37 +11,39 @@ from loguru import logger
 from utils.channel_rewards import RedeemError
 
 STATE_FILE = Path(__file__).resolve().parent.parent / "auto_resgate.json"
-CONFIG_FILE = STATE_FILE.with_name("config.json")
 RETRY_SECONDS = 10 * 60
+
+_instance = None
 
 
 class AutoRedeem:
     def __init__(self, manager, config: dict, state_file: Path = STATE_FILE):
         self.manager = manager
-        self.enabled = bool(config.get("enabled", False))
         self.display_title = config["title"]
         self.title = config["title"].strip().casefold()
         self.min_points = config.get("min_points", 300)
+        # O streamer pode mudar o preço; acima disto o canal é pulado
+        self.max_cost = config.get("max_cost", self.min_points)
         self.per_round = config.get("channels_per_round", 3)
         self.seconds_each = config.get("hours_per_redeem", 1) * 3600
         self.state_file = state_file
         self.state = self._load()
+        self.enabled = self.state.pop("enabled", bool(config.get("enabled", False)))
 
     def _load(self) -> dict:
         try:
             state = json.loads(self.state_file.read_text(encoding="utf-8"))
-            return {"next_at": float(state["next_at"]), "last": dict(state["last"])}
+            loaded = {"next_at": float(state["next_at"]), "last": dict(state["last"])}
+            if "enabled" in state:
+                loaded["enabled"] = bool(state["enabled"])
+            return loaded
         except (OSError, ValueError, KeyError, TypeError):
             return {"next_at": 0.0, "last": {}}
 
     def set_enabled(self, enabled: bool):
-        """Vale na hora e fica gravado no config.json para o próximo início."""
-        config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        config["AutoRedeem"]["enabled"] = enabled
-        tmp = CONFIG_FILE.with_suffix(".tmp")
-        tmp.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(CONFIG_FILE)
+        """Vale na hora, mesmo se salvar falhar; o estado guarda para o próximo início."""
         self.enabled = enabled
+        self._save()
         logger.info(f"Resgate automático {'ligado' if enabled else 'desligado'}")
 
     def status(self) -> dict:
@@ -49,7 +51,7 @@ class AutoRedeem:
 
     def _save(self):
         tmp = self.state_file.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self.state, indent=2), encoding="utf-8")
+        tmp.write_text(json.dumps({**self.state, "enabled": self.enabled}, indent=2), encoding="utf-8")
         tmp.replace(self.state_file)
 
     def _redeem_in(self, channel: str) -> bool:
@@ -60,7 +62,17 @@ class AutoRedeem:
         points = info["points"]
         if points is None or points < max(self.min_points, reward["cost"]):
             return False
-        self.manager.redeem_reward(channel, reward["id"])
+        if reward["cost"] > self.max_cost:
+            logger.warning(f"Resgate automático: {channel} cobra {reward['cost']}, acima de {self.max_cost}; pulando")
+            return False
+        try:
+            self.manager.redeem_reward(channel, reward["id"])
+        except RedeemError:
+            raise
+        except Exception as e:
+            # Sem resposta da Kick o resgate pode ter sido cobrado: conta como feito, para não pagar duas vezes
+            logger.warning(f"Resgate automático: {channel}: resultado incerto, contando como resgatado: {e}")
+            return True
         logger.success(f"Resgate automático: {reward['title']} em {channel} ({points} pontos antes)")
         return True
 
@@ -76,6 +88,9 @@ class AutoRedeem:
                 redeemed = self._redeem_in(channel)
             except RedeemError as e:
                 logger.warning(f"Resgate automático: {channel}: {e}")
+                redeemed = False
+            except Exception as e:
+                logger.warning(f"Resgate automático: {channel}: falha ao consultar: {e}")
                 redeemed = False
             if redeemed:
                 done += 1
@@ -101,8 +116,19 @@ class AutoRedeem:
                     self.run_round(time.time())
             except Exception as e:
                 logger.error(f"Resgate automático falhou nesta rodada: {e}")
-                self.state["next_at"] = time.time() + RETRY_SECONDS
+                # Um erro nunca encurta a espera já marcada
+                self.state["next_at"] = max(self.state["next_at"], time.time() + RETRY_SECONDS)
             time.sleep(30)
 
     def start(self):
         threading.Thread(target=self.loop, daemon=True, name="auto-redeem").start()
+
+
+def start_once(manager, config: dict) -> AutoRedeem:
+    """O main() pode rodar de novo no mesmo processo; duas threads resgatariam em dobro."""
+    global _instance
+    if _instance is None:
+        _instance = AutoRedeem(manager, config)
+        _instance.start()
+    _instance.manager = manager
+    return _instance

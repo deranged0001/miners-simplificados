@@ -89,9 +89,8 @@ async def main():
 
     auto_cfg = config.get("AutoRedeem", {})
     if auto_cfg.get("title"):
-        from utils.auto_redeem import AutoRedeem
-        account_manager.auto_redeem = AutoRedeem(account_manager, auto_cfg)
-        account_manager.auto_redeem.start()
+        from utils.auto_redeem import start_once
+        account_manager.auto_redeem = start_once(account_manager, auto_cfg)
         logger.info(f"🎁 Resgate automático: {auto_cfg['title']}")
 
     # 7. Запуск всех аккаунтов
