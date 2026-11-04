@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Kick Pontos</title>
+<title>Pontos Kick e Twitch</title>
 <style>
 :root {
   --bg: #0b0d0c;
@@ -145,24 +145,33 @@ dialog select:focus-visible { outline: 2px solid var(--green); outline-offset: 2
 <div class="wrap">
   <header>
     <div class="brand">
-      <div class="logo" aria-hidden="true">K</div>
+      <div class="logo" aria-hidden="true">P</div>
       <div>
-        <h1>Kick Pontos</h1>
+        <h1>Pontos Kick e Twitch</h1>
         <p id="accounts">Carregando…</p>
       </div>
     </div>
     <div class="sync" id="sync" role="status"><span class="dot"></span><span id="syncText">Conectando…</span></div>
   </header>
 
-  <section class="stats" aria-label="Resumo">
+  <h2 style="margin:0 0 8px">Kick</h2>
+  <section class="stats" aria-label="Resumo da Kick">
     <div class="stat"><div class="label">Total de pontos</div><div class="value" id="sTotal">–</div></div>
     <div class="stat"><div class="label">Ganho nesta sessão</div><div class="value green" id="sGain">–</div></div>
     <div class="stat"><div class="label">Assistindo agora</div><div class="value" id="sWatch">–</div></div>
     <div class="stat"><div class="label">Ao vivo</div><div class="value" id="sLive">–</div></div>
   </section>
 
+  <h2 style="margin:16px 0 8px">Twitch</h2>
+  <section class="stats" aria-label="Resumo da Twitch">
+    <div class="stat"><div class="label">Total de pontos</div><div class="value" id="tTotal">–</div></div>
+    <div class="stat"><div class="label">Ganho nesta sessão</div><div class="value green" id="tGain">–</div></div>
+    <div class="stat"><div class="label">Ao vivo</div><div class="value" id="tLive">–</div></div>
+    <div class="stat"><div class="label">Situação</div><div class="value" id="tState">–</div></div>
+  </section>
+
   <div class="toolbar">
-    <h2>Canais</h2>
+    <h2>Canais da Kick</h2>
     <div class="actions">
       <div class="filters" role="group" aria-label="Filtro">
         <button data-f="all" aria-pressed="true">Todos</button>
@@ -173,11 +182,12 @@ dialog select:focus-visible { outline: 2px solid var(--green); outline-offset: 2
       <button class="btn" id="reFail" disabled>↻ Reconectar falhas</button>
       <button class="btn" id="reAll">↻ Reconectar todos</button>
       <button class="btn" id="rdOpen">🎁 Resgatar</button>
-      <button class="btn" id="autoBtn" hidden aria-pressed="false"></button>
     </div>
   </div>
   <p class="alive" id="msg" role="status" style="margin:-4px 0 12px"></p>
   <div class="grid" id="grid"></div>
+  <h2 style="margin:24px 0 12px">Canais da Twitch</h2>
+  <div class="grid" id="twGrid"></div>
 </div>
 
 <dialog id="rd" aria-labelledby="rdTitle">
@@ -332,7 +342,7 @@ const NEXT_MS = 10 * 60 * 1000;
 
 // Atualiza os relógios a cada segundo, sem esperar nova leitura do miner
 function tick() {
-  for (const c of document.querySelectorAll(".card")) {
+  for (const c of document.querySelectorAll("#grid .card")) {
     const el = c.querySelector(".upd");
     const u = c.dataset.upd;
     if (!u) { el.textContent = "Aguardando primeira leitura"; continue; }
@@ -343,7 +353,7 @@ function tick() {
     }
     el.textContent = txt;
   }
-  for (const c of document.querySelectorAll(".card")) {
+  for (const c of document.querySelectorAll("#grid .card")) {
     const el = c.querySelector(".alive");
     if (!c.dataset.watch) { el.textContent = ""; continue; }
     const tries = c.dataset.tries ? ` · tentativa ${c.dataset.tries}/5` : "";
@@ -435,13 +445,16 @@ function rdStatus(text, kind = "") {
   $("rdMsg").className = kind;
 }
 
+const rdApi = (site, action) => (site === "twitch" ? "/api/twitch/" : "/api/") + action;
+
 async function rdLoad() {
   const channel = $("rdChan").value;
+  const [site, name] = channel.split("/");
   $("rdList").replaceChildren();
   $("rdBal").textContent = "Carregando recompensas…";
   rdStatus("");
   try {
-    const res = await fetch("/api/rewards?channel=" + encodeURIComponent(channel), { cache: "no-store" });
+    const res = await fetch(rdApi(site, "rewards") + "?channel=" + encodeURIComponent(name), { cache: "no-store" });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || res.status);
     if (channel !== $("rdChan").value) return;  // trocou de canal no meio
@@ -472,7 +485,7 @@ function rdRow(channel, r) {
   btn.textContent = fmt(r.cost) + " pts";
   if (r.paused || r.needs_input || short) {
     btn.disabled = true;
-    btn.title = r.paused ? "Pausada pelo canal" : r.needs_input ? "Pede texto: resgate pelo site da Kick" : `Faltam ${fmt(r.cost - rdBalance)} pontos`;
+    btn.title = r.paused ? "Pausada pelo canal" : r.needs_input ? "Pede texto: resgate pelo site do canal" : `Faltam ${fmt(r.cost - rdBalance)} pontos`;
   } else {
     btn.classList.add("go");
     btn.addEventListener("click", () => rdRedeem(channel, r, btn));
@@ -480,49 +493,20 @@ function rdRow(channel, r) {
   return row;
 }
 
-const autoBtn = document.getElementById("autoBtn");
-function autoShow(a) {
-  autoBtn.hidden = !a.configured;
-  if (!a.configured) return;
-  const next = new Date(a.next_at * 1000).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  autoBtn.textContent = a.enabled ? `⏱ Resgate automático: ligado (próximo ${next})` : "⏱ Resgate automático: desligado";
-  autoBtn.style.borderColor = a.enabled ? "var(--green)" : "";
-  autoBtn.style.color = a.enabled ? "var(--green)" : "";
-  autoBtn.title = a.title;
-  autoBtn.setAttribute("aria-pressed", String(a.enabled));
-}
-async function autoLoad(options) {
-  const res = await fetch("/api/auto-redeem", options);
-  const a = await res.json();
-  if (!res.ok) throw new Error(a.error || res.status);
-  autoShow(a);
-}
-autoBtn.addEventListener("click", async () => {
-  const enable = autoBtn.getAttribute("aria-pressed") !== "true";
-  autoBtn.disabled = true;
-  try {
-    await autoLoad({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: enable }) });
-  } catch (e) {
-    document.getElementById("msg").textContent = "Não foi possível mudar o resgate automático: " + e.message;
-  }
-  autoBtn.disabled = false;
-});
-autoLoad().catch(() => {});
-setInterval(() => autoLoad().catch(() => {}), 60000);
-
 async function rdRedeem(channel, r, btn) {
   if (rdBusy) return;
-  if (!confirm(`Gastar ${fmt(r.cost)} pontos de ${channel} em "${r.title}"?`)) return;
+  const [site, name] = channel.split("/");
+  if (!confirm(`Gastar ${fmt(r.cost)} pontos de ${name} (${site}) em "${r.title}"?`)) return;
   rdBusy = true;
   document.querySelectorAll("#rdList button").forEach(b => b.disabled = true);
   btn.textContent = "Resgatando…";
   rdStatus("");
   let ok = false;
   try {
-    const res = await fetch("/api/redeem", {
+    const res = await fetch(rdApi(site, "redeem"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ channel, reward_id: r.id }),
+      body: JSON.stringify({ channel: name, reward_id: r.id }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || res.status);
@@ -535,26 +519,91 @@ async function rdRedeem(channel, r, btn) {
   const msg = [$("rdMsg").textContent, $("rdMsg").className];
   await rdLoad();
   rdStatus(...msg);
-  if (ok) refresh();
+  if (ok) { refresh(); twRefresh(); }
 }
 
 $("rdOpen").addEventListener("click", () => {
   const sel = $("rdChan");
   const prev = sel.value;
-  const all = lastData ? rows(lastData) : [];
-  sel.replaceChildren(...all.sort((a, b) => (b.points || 0) - (a.points || 0)).map(r => {
-    const o = document.createElement("option");
-    o.value = r.name;
-    // Logo depois de iniciar o miner ainda não leu os saldos; o saldo exato vem ao escolher o canal
-    o.textContent = r.points ? `${r.name} · ${fmt(r.points)} pts` : r.name;
-    return o;
-  }));
-  if (prev && all.some(r => r.name === prev)) sel.value = prev;
+  const group = (label, site, list) => {
+    const g = document.createElement("optgroup");
+    g.label = label;
+    g.append(...[...list].sort((a, b) => (b.points || 0) - (a.points || 0)).map(r => {
+      const o = document.createElement("option");
+      o.value = site + "/" + r.name;
+      // Logo depois de iniciar o miner ainda não leu os saldos; o saldo exato vem ao escolher o canal
+      o.textContent = r.points ? `${r.name} · ${fmt(r.points)} pts` : r.name;
+      return o;
+    }));
+    return g;
+  };
+  sel.replaceChildren(group("Kick", "kick", lastData ? rows(lastData) : []), group("Twitch", "twitch", twData || []));
+  if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
   $("rd").showModal();
   if (sel.value) rdLoad();
 });
 $("rdChan").addEventListener("change", rdLoad);
 $("rdClose").addEventListener("click", () => $("rd").close());
+
+// Twitch: o miner roda em outro processo; o painel lê o saldo dele pela ponte
+let twData = null;
+let twBase = {};
+try { twBase = JSON.parse(sessionStorage.getItem("kp_tw_base") || "{}"); } catch (e) {}
+
+function twRender() {
+  const list = twData || [];
+  let total = 0, gain = 0, live = 0;
+  for (const r of list) {
+    const p = Number(r.points || 0);
+    total += p;
+    if (r.online) live++;
+    if (p > 0 && twBase[r.name] === undefined) twBase[r.name] = p;
+    if (twBase[r.name] !== undefined) gain += Math.max(0, p - twBase[r.name]);
+  }
+  try { sessionStorage.setItem("kp_tw_base", JSON.stringify(twBase)); } catch (e) {}
+  $("tTotal").textContent = twData ? fmt(total) : "–";
+  $("tGain").textContent = twData ? "+" + fmt(gain) : "–";
+  $("tLive").textContent = twData ? `${live} / ${list.length}` : "–";
+  $("tState").textContent = twData ? "Rodando" : "Parado";
+  const shown = list
+    .filter(r => filter === "all" || r.online)
+    .sort((a, b) => b.online - a.online || b.points - a.points);
+  if (!shown.length) {
+    $("twGrid").innerHTML = `<div class="empty">${twData ? "Nenhum canal neste filtro." : "O miner da Twitch não está respondendo."}</div>`;
+    return;
+  }
+  $("twGrid").replaceChildren(...shown.map(r => {
+    const state = r.online ? "live" : "offline";
+    const g = twBase[r.name] !== undefined ? r.points - twBase[r.name] : 0;
+    const card = document.createElement("article");
+    card.className = "card " + state;
+    card.innerHTML = `
+      <div class="top">
+        <div class="avatar" style="background:hsl(${hue(r.name)} 70% 62%)" aria-hidden="true"></div>
+        <div class="name"><a target="_blank" rel="noopener"></a></div>
+        <span class="pill ${state}">${LABELS[state]}</span>
+      </div>
+      <div class="points"><span class="num">${fmt(r.points)}</span><span class="gain">${g > 0 ? "+" + fmt(g) : ""}</span></div>`;
+    card.querySelector(".avatar").textContent = r.name[0].toUpperCase();
+    const a = card.querySelector(".name a");
+    a.textContent = r.name;
+    a.href = "https://www.twitch.tv/" + encodeURIComponent(r.name);
+    return card;
+  }));
+}
+
+async function twRefresh() {
+  try {
+    const res = await fetch("/api/twitch/status", { cache: "no-store" });
+    if (!res.ok) throw new Error(res.status);
+    twData = (await res.json()).streamers;
+  } catch (e) {
+    twData = null;
+  }
+  twRender();
+}
+twRefresh();
+setInterval(twRefresh, 15000);
 
 async function refresh() {
   const sync = $("sync");
@@ -574,6 +623,7 @@ async function refresh() {
 
 document.querySelectorAll(".filters button").forEach(b => b.addEventListener("click", () => {
   filter = b.dataset.f;
+  twRender();
   document.querySelectorAll(".filters button").forEach(x => x.setAttribute("aria-pressed", x === b));
   render();
 }));

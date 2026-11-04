@@ -1,6 +1,9 @@
 import os
 import threading
 import json
+import urllib.error
+import urllib.parse
+import urllib.request
 from flask import Flask, render_template_string, jsonify, send_file, request
 from loguru import logger
 from datetime import datetime
@@ -825,23 +828,38 @@ def redeem():
         return jsonify({"error": "falha ao falar com a Kick"}), 502
 
 
-@app.route('/api/auto-redeem', methods=['GET', 'POST'])
-def auto_redeem():
-    auto = getattr(_account_manager, "auto_redeem", None)
-    if auto is None:
-        return jsonify({"configured": False})
-    if request.method == 'POST':
-        if not request.is_json:
-            return jsonify({"error": "JSON obrigatório"}), 415
-        enabled = (request.get_json(silent=True) or {}).get("enabled")
-        if not isinstance(enabled, bool):
-            return jsonify({"error": "enabled obrigatório"}), 400
-        try:
-            auto.set_enabled(enabled)
-        except (OSError, ValueError, KeyError) as e:
-            logger.error(f"API /api/auto-redeem error: {e}")
-            return jsonify({"error": "não foi possível salvar"}), 500
-    return jsonify({"configured": True, **auto.status()})
+def _twitch_bridge(path, body=None):
+    """Repassa para o miner da Twitch, que roda em outro processo (run.example.py)."""
+    req = urllib.request.Request(
+        "http://127.0.0.1:5001" + path,
+        data=None if body is None else json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        # Resgate confere e paga em vários pedidos à Twitch; o tempo cobre todos
+        with urllib.request.urlopen(req, timeout=40) as resp:
+            return jsonify(json.load(resp)), resp.status
+    except urllib.error.HTTPError as e:
+        return jsonify(json.load(e)), e.code
+    except (OSError, ValueError):
+        return jsonify({"error": "o miner da Twitch não está respondendo"}), 503
+
+
+@app.route('/api/twitch/status')
+def twitch_status():
+    return _twitch_bridge("/status")
+
+
+@app.route('/api/twitch/rewards')
+def twitch_rewards():
+    return _twitch_bridge("/rewards?" + urllib.parse.urlencode({"channel": request.args.get("channel", "")}))
+
+
+@app.route('/api/twitch/redeem', methods=['POST'])
+def twitch_redeem():
+    if not request.is_json:
+        return jsonify({"error": "JSON obrigatório"}), 415
+    return _twitch_bridge("/redeem", request.get_json(silent=True) or {})
 
 
 def start_server(streamers_data, port=5000):

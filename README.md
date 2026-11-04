@@ -2,7 +2,7 @@
 
 Uma forma simples de acumular **pontos de canal** na Kick e na Twitch sem deixar o navegador aberto.
 Uma janela com dois botões (**Iniciar** e **Parar**) controla os dois miners em segundo plano, e um
-painel no navegador mostra os pontos da Kick, com o status real de cada conexão.
+painel no navegador mostra os pontos da Kick e da Twitch, com o status real de cada conexão da Kick.
 
 > [!TIP]
 > **Já instalou e quer atualizar?** Veja o passo a passo em [ATUALIZAR.md](ATUALIZAR.md).
@@ -122,7 +122,7 @@ Fechar a janela **não** para os miners. Use o botão Parar. Mudou a configuraç
 
 O **Iniciar** também liga um vigia escondido. A cada minuto ele confere os miners: se um parou, ou se o log da Twitch ficou 10 minutos sem novidade, ele reinicia esse miner. Cada reinício fica anotado em `controle\guardiao-log.txt`. O Parar e o Atualizar desligam o vigia.
 
-**Resgate automático (opcional):** gasta pontos sozinho, em rodízio entre os canais. Para usar, preencha `AutoRedeem` no `config.json` com o nome exato da recompensa em `title` e reinicie a Kick. Depois, ligue e desligue pelo botão ⏱ do painel. A cada rodada ele resgata em `channels_per_round` canais com pelo menos `min_points` pontos, pula o canal se o item custar mais que `max_cost` e espera `hours_per_redeem` horas por resgate até a próxima rodada.
+
 
 Para colocar um ícone próprio na janela e no atalho, salve um `miners.ico` na pasta `controle` e rode o `instalar.bat` de novo.
 
