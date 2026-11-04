@@ -158,7 +158,7 @@ def redeem_reward(miner, channel, reward_id):
         "operationName": "RedeemCustomReward",
         "query": REDEEM_MUTATION,
         "variables": {"input": {
-            "channelID": channel_id, "cost": reward["cost"], "prompt": None, "rewardID": reward_id,
+            "channelID": channel_id, "cost": reward["cost"], "prompt": reward.get("prompt"), "rewardID": reward_id,
             "title": reward["title"], "transactionID": uuid.uuid4().hex,
         }},
     })
@@ -171,10 +171,18 @@ def redeem_reward(miner, channel, reward_id):
     return {"title": reward["title"], "cost": reward["cost"], "points": streamer.channel_points}
 
 
+def is_watching(streamer):
+    """A Twitch só conta 2 canais por vez; o miner marca a hora de cada minuto enviado."""
+    # shortcut: lê campo privado do Stream; se o miner mudar, fica sempre False
+    last = getattr(streamer.stream, "_Stream__minute_watched_timestamp", 0)
+    return bool(streamer.is_online and last and time.time() - last < 150)
+
+
 def bridge_answer(miner, method, path, query, body):
     if method == "GET" and path == "/status":
         return 200, {"streamers": [
-            {"name": s.username, "points": s.channel_points, "online": bool(s.is_online)}
+            {"name": s.username, "points": s.channel_points, "online": bool(s.is_online),
+             "watching": is_watching(s), "chat": bool(s.is_online and chat_ok(s))}
             for s in list(miner.streamers)
         ]}
     if method == "GET" and path == "/rewards":

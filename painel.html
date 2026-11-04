@@ -132,7 +132,19 @@ dialog select:focus-visible { outline: 2px solid var(--green); outline-offset: 2
 
 .empty { color: var(--muted); text-align: center; padding: 48px 16px; border: 1px dashed var(--line); border-radius: var(--radius); }
 
+.grid[hidden] { display: none; }
+.sites { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+.site { background: none; border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }
+.site.on { border-color: var(--green); }
+.site-tab { display: block; width: 100%; background: none; border: 0; color: inherit; font: inherit; font-weight: 700; font-size: 15px; text-align: left; padding: 0 0 8px; cursor: pointer; }
+.site.on .site-tab { color: var(--green); }
+.site-tab:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.site .stats { grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 0; }
+.site .stat { padding: 8px 10px; }
+.site .stat .value { font-size: 20px; }
+
 @media (max-width: 760px) {
+  .sites { grid-template-columns: 1fr; }
   .stats { grid-template-columns: repeat(2, 1fr); }
   .stat .value { font-size: 22px; }
 }
@@ -154,7 +166,9 @@ dialog select:focus-visible { outline: 2px solid var(--green); outline-offset: 2
     <div class="sync" id="sync" role="status"><span class="dot"></span><span id="syncText">Conectando…</span></div>
   </header>
 
-  <h2 style="margin:0 0 8px">Kick</h2>
+  <div class="sites">
+  <div class="site" data-site="kick">
+  <button class="site-tab" aria-pressed="true">Kick</button>
   <section class="stats" aria-label="Resumo da Kick">
     <div class="stat"><div class="label">Total de pontos</div><div class="value" id="sTotal">–</div></div>
     <div class="stat"><div class="label">Ganho nesta sessão</div><div class="value green" id="sGain">–</div></div>
@@ -162,16 +176,20 @@ dialog select:focus-visible { outline: 2px solid var(--green); outline-offset: 2
     <div class="stat"><div class="label">Ao vivo</div><div class="value" id="sLive">–</div></div>
   </section>
 
-  <h2 style="margin:16px 0 8px">Twitch</h2>
+  </div>
+  <div class="site" data-site="twitch">
+  <button class="site-tab" aria-pressed="false">Twitch</button>
   <section class="stats" aria-label="Resumo da Twitch">
     <div class="stat"><div class="label">Total de pontos</div><div class="value" id="tTotal">–</div></div>
     <div class="stat"><div class="label">Ganho nesta sessão</div><div class="value green" id="tGain">–</div></div>
     <div class="stat"><div class="label">Ao vivo</div><div class="value" id="tLive">–</div></div>
-    <div class="stat"><div class="label">Situação</div><div class="value" id="tState">–</div></div>
+    <div class="stat"><div class="label">Assistindo agora</div><div class="value" id="tState">–</div></div>
   </section>
+  </div>
+  </div>
 
   <div class="toolbar">
-    <h2>Canais da Kick</h2>
+    <h2 id="listTitle">Canais da Kick</h2>
     <div class="actions">
       <div class="filters" role="group" aria-label="Filtro">
         <button data-f="all" aria-pressed="true">Todos</button>
@@ -186,8 +204,7 @@ dialog select:focus-visible { outline: 2px solid var(--green); outline-offset: 2
   </div>
   <p class="alive" id="msg" role="status" style="margin:-4px 0 12px"></p>
   <div class="grid" id="grid"></div>
-  <h2 style="margin:24px 0 12px">Canais da Twitch</h2>
-  <div class="grid" id="twGrid"></div>
+  <div class="grid" id="twGrid" hidden></div>
 </div>
 
 <dialog id="rd" aria-labelledby="rdTitle">
@@ -564,16 +581,17 @@ function twRender() {
   $("tTotal").textContent = twData ? fmt(total) : "–";
   $("tGain").textContent = twData ? "+" + fmt(gain) : "–";
   $("tLive").textContent = twData ? `${live} / ${list.length}` : "–";
-  $("tState").textContent = twData ? "Rodando" : "Parado";
+  $("tState").textContent = twData ? `${list.filter(r => r.watching).length} / 2` : "Parado";
   const shown = list
-    .filter(r => filter === "all" || r.online)
-    .sort((a, b) => b.online - a.online || b.points - a.points);
+    .filter(r => filter === "all" || (filter === "live" ? r.online : r.watching))
+    .sort((a, b) => b.watching - a.watching || b.online - a.online || b.chat - a.chat || b.points - a.points);
   if (!shown.length) {
     $("twGrid").innerHTML = `<div class="empty">${twData ? "Nenhum canal neste filtro." : "O miner da Twitch não está respondendo."}</div>`;
     return;
   }
   $("twGrid").replaceChildren(...shown.map(r => {
-    const state = r.online ? "live" : "offline";
+    const [state, label] = !r.online ? ["offline", "Offline"] : r.watching ? ["watching", "Assistindo"]
+      : r.chat ? ["live", "No chat"] : ["warn", "Sem chat"];
     const g = twBase[r.name] !== undefined ? r.points - twBase[r.name] : 0;
     const card = document.createElement("article");
     card.className = "card " + state;
@@ -581,7 +599,7 @@ function twRender() {
       <div class="top">
         <div class="avatar" style="background:hsl(${hue(r.name)} 70% 62%)" aria-hidden="true"></div>
         <div class="name"><a target="_blank" rel="noopener"></a></div>
-        <span class="pill ${state}">${LABELS[state]}</span>
+        <span class="pill ${state}">${label}</span>
       </div>
       <div class="points"><span class="num">${fmt(r.points)}</span><span class="gain">${g > 0 ? "+" + fmt(g) : ""}</span></div>`;
     card.querySelector(".avatar").textContent = r.name[0].toUpperCase();
@@ -604,6 +622,26 @@ async function twRefresh() {
 }
 twRefresh();
 setInterval(twRefresh, 15000);
+
+function showSite(site) {
+  const twitch = site === "twitch";
+  document.querySelectorAll(".site").forEach(el => {
+    const on = el.dataset.site === site;
+    el.classList.toggle("on", on);
+    el.querySelector(".site-tab").setAttribute("aria-pressed", String(on));
+  });
+  $("grid").hidden = twitch;
+  $("twGrid").hidden = !twitch;
+  $("listTitle").textContent = twitch ? "Canais da Twitch" : "Canais da Kick";
+  // Estes botões só valem para as conexões da Kick
+  ["chk", "reFail", "reAll"].forEach(id => { $(id).hidden = twitch; });
+  try { localStorage.setItem("kp_site", site); } catch (e) {}
+}
+document.querySelectorAll(".site").forEach(el =>
+  el.querySelector(".site-tab").addEventListener("click", () => showSite(el.dataset.site)));
+let savedSite = "kick";
+try { savedSite = localStorage.getItem("kp_site") || "kick"; } catch (e) {}
+showSite(savedSite === "twitch" ? "twitch" : "kick");
 
 async function refresh() {
   const sync = $("sync");
