@@ -20,6 +20,12 @@ from pathlib import Path
 from tkinter import messagebox
 from urllib.parse import unquote
 
+try:
+    import pystray
+    from PIL import Image
+except ImportError:  # o instalar.ps1 instala; sem eles só falta o botão da bandeja
+    pystray = None
+
 # Este arquivo fica em <repo>/controle; o miner da Kick é a raiz do repo
 # e o da Twitch é baixado pelo instalar.ps1 em <repo>/twitch
 REPO = Path(__file__).resolve().parent.parent
@@ -368,6 +374,9 @@ class App(tk.Tk):
             side="left", expand=True, fill="x", padx=(4, 0))
 
         self._button(self, "⟳  Atualizar", CARD, MUTED, self.on_update).pack(fill="x", pady=(8, 0))
+        if pystray:
+            self._button(self, "▾  Esconder na bandeja", CARD, MUTED, self.to_tray).pack(fill="x", pady=(8, 0))
+        self.tray = None
 
         self.msg = tk.Label(self, text="", bg=BG, fg=MUTED, font=("Segoe UI", 9),
                             wraplength=280, justify="left")
@@ -463,6 +472,25 @@ class App(tk.Tk):
         subprocess.Popen(["cmd", "/c", str(REPO / "atualizar.bat")], cwd=REPO,
                          creationflags=subprocess.CREATE_NEW_CONSOLE)
         self.msg.config(text="Atualizando na janela preta. Quando terminar, feche e abra este app de novo.")
+
+    def to_tray(self):
+        """Some da barra de tarefas; o ícone perto do relógio traz a janela de volta."""
+        icon = Path(__file__).with_name("miners.ico")
+        image = Image.open(icon) if icon.exists() else Image.new("RGB", (64, 64), GREEN)
+        self.tray = pystray.Icon("miners", image, "Miners Kick e Twitch", pystray.Menu(
+            pystray.MenuItem("Mostrar", lambda: self.after(0, self.from_tray), default=True),
+            pystray.MenuItem("Abrir painel da Kick", lambda: webbrowser.open(PAINEL)),
+        ))
+        self.tray.run_detached()
+        self.withdraw()
+
+    def from_tray(self):
+        if self.tray:
+            self.tray.stop()
+            self.tray = None
+        self.deiconify()
+        self.lift()
+        self.refresh(schedule=False)
 
     def on_config(self):
         ConfigWindow(self)

@@ -88,6 +88,10 @@ if ($LASTEXITCODE -ne 0) { Fail "pip falhou no miner da Twitch." }
 Copy-Item "$Repo\twitch\run.example.py" "$TwitchDir\run.py" -Force
 Copy-Item "$Repo\twitch\login_twitch.py" "$TwitchDir\login_twitch.py" -Force
 
+# Ícone na bandeja do Windows (opcional: sem ele o app só não mostra o botão)
+PyRun -m pip install --user -q --disable-pip-version-check pystray pillow
+if ($LASTEXITCODE -ne 0) { Write-Host "Aviso: nao deu para instalar o icone da bandeja; o resto funciona." }
+
 # 4. Atalho na Área de Trabalho, abrindo a janela de controle sem console
 Step "Criando atalho na Area de Trabalho"
 $Pythonw = (PyRun -c "import sys; print(sys.executable)").Trim() -replace "python\.exe$", "pythonw.exe"
