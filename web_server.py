@@ -836,8 +836,8 @@ def _twitch_bridge(path, body=None):
         headers={"Content-Type": "application/json"},
     )
     try:
-        # Resgate confere e paga em vários pedidos à Twitch; o tempo cobre todos
-        with urllib.request.urlopen(req, timeout=40) as resp:
+        # Resgate em lote: até 50 pedidos à Twitch com pausa entre eles; o tempo cobre todos
+        with urllib.request.urlopen(req, timeout=120) as resp:
             return jsonify(json.load(resp)), resp.status
     except urllib.error.HTTPError as e:
         return jsonify(json.load(e)), e.code

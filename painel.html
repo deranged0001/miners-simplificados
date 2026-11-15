@@ -126,6 +126,13 @@ dialog select:focus-visible { outline: 2px solid var(--green); outline-offset: 2
 .reward .btn.go { background: var(--green); color: #000; border-color: var(--green); }
 .reward .btn.go:hover:not(:disabled) { color: #000; filter: brightness(1.1); }
 #rdMsg { margin-top: 12px; font-size: 13px; min-height: 18px; }
+.reward.bulk { flex-wrap: wrap; }
+.qty { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.qty input {
+  width: 64px; background: var(--surface); color: var(--text); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 13px;
+}
+.qty input:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 #rdMsg.ok { color: var(--green); }
 #rdMsg.err { color: var(--red); }
 .dlg-foot { display: flex; justify-content: flex-end; margin-top: 12px; }
@@ -490,6 +497,7 @@ async function rdLoad() {
 }
 
 function rdRow(channel, r) {
+  if (channel.startsWith("twitch/")) return rdBulkRow(channel, r);
   const row = document.createElement("div");
   row.className = "reward";
   row.style.borderLeftColor = /^#[0-9a-f]{3,8}$/i.test(r.color) ? r.color : "var(--line)";
@@ -510,25 +518,68 @@ function rdRow(channel, r) {
   return row;
 }
 
-async function rdRedeem(channel, r, btn) {
+// Twitch: escolhe quantas vezes; o botão só libera se o saldo cobrir o lote inteiro
+function rdBulkRow(channel, r) {
+  const row = document.createElement("div");
+  row.className = "reward bulk";
+  row.style.borderLeftColor = /^#[0-9a-f]{3,8}$/i.test(r.color) ? r.color : "var(--line)";
+  row.innerHTML = '<div class="info"><b></b><small></small></div>' +
+    '<label class="qty">Qtd <input type="number" min="1" step="1" value="1"></label><button class="btn"></button>';
+  // Títulos e descrições vêm do canal: textContent evita injetar HTML
+  row.querySelector("b").textContent = r.title;
+  const limit = r.max_count ?? 1;  // miner da Twitch antigo, sem lote: um por vez
+  row.querySelector("small").textContent = `${fmt(r.cost)} pts cada` +
+    (limit < 50 ? ` · máximo agora: ${limit}` : "") + (r.description ? " · " + r.description : "");
+  const input = row.querySelector("input");
+  const btn = row.querySelector("button");
+  const affordable = rdBalance && r.cost ? Math.floor(rdBalance / r.cost) : 0;
+  input.max = Math.max(Math.min(limit, affordable), 1);
+  input.setAttribute("aria-label", "Quantidade de " + r.title);
+  const blocked = r.paused ? "Pausada pelo canal" : r.needs_input ? "Pede texto: resgate pelo site do canal"
+    : limit < 1 ? "Em tempo de espera ou no limite da live" : null;
+  input.disabled = !!blocked;
+  const update = () => {
+    const n = Number(input.value);
+    const valid = Number.isInteger(n) && n >= 1;
+    btn.textContent = valid ? `Resgatar ${n}× · ${fmt(r.cost * n)} pts` : "Resgatar";
+    let why = blocked;
+    if (!why && !valid) why = "Quantidade inválida";
+    if (!why && n > limit) why = `Esta recompensa permite no máximo ${limit} agora`;
+    if (!why && (rdBalance === null || rdBalance < r.cost * n)) why = rdBalance === null
+      ? "Saldo indisponível" : `Faltam ${fmt(r.cost * n - rdBalance)} pontos`;
+    btn.disabled = rdBusy || !!why;
+    btn.classList.toggle("go", !why);
+    btn.title = why || "";
+  };
+  input.addEventListener("input", update);
+  btn.addEventListener("click", () => rdRedeem(channel, r, btn, Number(input.value)));
+  update();
+  return row;
+}
+
+async function rdRedeem(channel, r, btn, count = 1) {
   if (rdBusy) return;
   const [site, name] = channel.split("/");
-  if (!confirm(`Gastar ${fmt(r.cost)} pontos de ${name} (${site}) em "${r.title}"?`)) return;
+  if (!confirm(count > 1
+    ? `Resgatar "${r.title}" ${count}× em ${name} (${site}), gastando ${fmt(r.cost * count)} pontos?`
+    : `Gastar ${fmt(r.cost)} pontos de ${name} (${site}) em "${r.title}"?`)) return;
   rdBusy = true;
-  document.querySelectorAll("#rdList button").forEach(b => b.disabled = true);
-  btn.textContent = "Resgatando…";
+  document.querySelectorAll("#rdList button, #rdList input").forEach(b => b.disabled = true);
+  btn.textContent = count > 1 ? `Resgatando ${count}×…` : "Resgatando…";
   rdStatus("");
   let ok = false;
   try {
     const res = await fetch(rdApi(site, "redeem"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ channel: name, reward_id: r.id }),
+      body: JSON.stringify(site === "twitch" ? { channel: name, reward_id: r.id, count } : { channel: name, reward_id: r.id }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || res.status);
     ok = true;
-    rdStatus(`Resgatado: ${data.title}` + (data.points !== null ? ` · saldo agora ${fmt(data.points)}` : ""), "ok");
+    const saldo = data.points !== null ? ` · saldo agora ${fmt(data.points)}` : "";
+    if (data.stopped) rdStatus(`Resgatou ${data.done} de ${data.requested}: parou porque ${data.stopped}${saldo}`);
+    else rdStatus(`Resgatado: ${data.title}` + (data.done > 1 ? ` ${data.done}×` : "") + saldo, "ok");
   } catch (e) {
     rdStatus("Resgate falhou: " + e.message, "err");
   }

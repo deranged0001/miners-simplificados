@@ -91,6 +91,9 @@ def check_chats(miner, log, strikes, keepalive):
 
 # Recompensas de pontos de canal, usadas pelo painel da Kick (ele repassa para a porta abaixo)
 BRIDGE_PORT = 5001
+MAX_COUNT = 50          # teto de resgates de uma vez
+REDEEM_GAP = 0.6        # segundos entre um resgate e o próximo do mesmo lote
+redeem_lock = threading.Lock()  # um lote por vez, para dois cliques não gastarem em dobro
 REDEEM_MUTATION = (
     "mutation RedeemCustomReward($input: RedeemCommunityPointsCustomRewardInput!) {"
     " redeemCommunityPointsCustomReward(input: $input) { error { code } redemption { id } } }"
@@ -120,6 +123,23 @@ def load_rewards(miner, channel):
     return ch["id"], ch["self"]["communityPoints"]["balance"], [r for r in rewards if r.get("isEnabled")]
 
 
+def redeem_limit(r):
+    """Quantas vezes dá para resgatar seguido, pelos limites que a Twitch mostra.
+    O limite por pessoa conta resgates que a Twitch não informa aqui; se estourar, o lote para."""
+    limit = MAX_COUNT
+    per_stream = r.get("maxPerStreamSetting") or {}
+    if per_stream.get("isEnabled"):
+        limit = min(limit, per_stream.get("maxPerStream", 0) - (r.get("redemptionsRedeemedCurrentStream") or 0))
+    per_user = r.get("maxPerUserPerStreamSetting") or {}
+    if per_user.get("isEnabled"):
+        limit = min(limit, per_user.get("maxPerUserPerStream", 0))
+    if (r.get("globalCooldownSetting") or {}).get("isEnabled"):
+        limit = min(limit, 1)  # com tempo de espera, só um por vez
+    if r.get("cooldownExpiresAt"):
+        limit = 0
+    return max(limit, 0)
+
+
 def list_rewards(miner, channel):
     find_streamer(miner, channel)
     _, points, rewards = load_rewards(miner, channel)
@@ -134,41 +154,57 @@ def list_rewards(miner, channel):
                 "color": r.get("backgroundColor") or "",
                 "paused": bool(r.get("isPaused")) or not r.get("isInStock", True),
                 "needs_input": bool(r.get("isUserInputRequired")),
+                "max_count": redeem_limit(r),
             }
             for r in rewards
         ), key=lambda r: r["cost"]),
     }
 
 
-def redeem_reward(miner, channel, reward_id):
+def redeem_reward(miner, channel, reward_id, count=1):
     streamer = find_streamer(miner, channel)
-    # Confere de novo na Twitch: o id tem que existir, estar ativo e caber no saldo
-    channel_id, points, rewards = load_rewards(miner, channel)
-    reward = next((r for r in rewards if r["id"] == reward_id), None)
-    if reward is None:
-        raise RedeemError("essa recompensa não existe mais neste canal")
-    if reward.get("isPaused") or not reward.get("isInStock", True):
-        raise RedeemError("essa recompensa está pausada")
-    if reward.get("isUserInputRequired"):
-        raise RedeemError("essa recompensa pede um texto; resgate pelo site da Twitch")
-    if points < reward["cost"]:
-        raise RedeemError(f"saldo insuficiente: {points} de {reward['cost']} pontos")
+    with redeem_lock:
+        # Confere de novo na Twitch: o id tem que existir, estar ativo e o lote inteiro caber no saldo
+        channel_id, points, rewards = load_rewards(miner, channel)
+        reward = next((r for r in rewards if r["id"] == reward_id), None)
+        if reward is None:
+            raise RedeemError("essa recompensa não existe mais neste canal")
+        if reward.get("isPaused") or not reward.get("isInStock", True):
+            raise RedeemError("essa recompensa está pausada")
+        if reward.get("isUserInputRequired"):
+            raise RedeemError("essa recompensa pede um texto; resgate pelo site da Twitch")
+        cost = reward["cost"]
+        if points < cost * count:
+            raise RedeemError(f"saldo insuficiente: {points} de {cost * count} pontos")
+        if count > redeem_limit(reward):
+            raise RedeemError(f"esta recompensa permite no máximo {redeem_limit(reward)} agora")
 
-    answer = miner.twitch.post_gql_request({
-        "operationName": "RedeemCustomReward",
-        "query": REDEEM_MUTATION,
-        "variables": {"input": {
-            "channelID": channel_id, "cost": reward["cost"], "prompt": reward.get("prompt"), "rewardID": reward_id,
-            "title": reward["title"], "transactionID": uuid.uuid4().hex,
-        }},
-    })
-    result = (answer.get("data") or {}).get("redeemCommunityPointsCustomReward")
-    if not result:
-        raise RedeemError("sem resposta da Twitch; confira o saldo antes de tentar de novo")
-    if result.get("error"):
-        raise RedeemError(f"a Twitch recusou o resgate ({result['error'].get('code')})")
-    streamer.channel_points = points - reward["cost"]
-    return {"title": reward["title"], "cost": reward["cost"], "points": streamer.channel_points}
+        done, stopped = 0, None
+        for i in range(count):
+            if i:
+                time.sleep(REDEEM_GAP)
+            answer = miner.twitch.post_gql_request({
+                "operationName": "RedeemCustomReward",
+                "query": REDEEM_MUTATION,
+                "variables": {"input": {
+                    "channelID": channel_id, "cost": cost, "prompt": reward.get("prompt"), "rewardID": reward_id,
+                    "title": reward["title"], "transactionID": uuid.uuid4().hex,
+                }},
+            })
+            result = (answer.get("data") or {}).get("redeemCommunityPointsCustomReward")
+            if not result:
+                stopped = "sem resposta da Twitch; confira o saldo antes de tentar de novo"
+                break
+            if result.get("error"):
+                stopped = f"a Twitch recusou o resgate ({result['error'].get('code')})"
+                break
+            done += 1
+        if not done and stopped:
+            raise RedeemError(stopped)
+        streamer.channel_points = points - cost * done
+    logging.getLogger("bridge").info(f"Resgatou '{reward['title']}' {done}/{count}x em {channel}")
+    return {"title": reward["title"], "cost": cost, "points": streamer.channel_points,
+            "done": done, "requested": count, "stopped": stopped}
 
 
 def is_watching(streamer):
@@ -188,10 +224,12 @@ def bridge_answer(miner, method, path, query, body):
     if method == "GET" and path == "/rewards":
         return 200, list_rewards(miner, query.get("channel", [""])[0])
     if method == "POST" and path == "/redeem":
-        channel, reward_id = body.get("channel"), body.get("reward_id")
+        channel, reward_id, count = body.get("channel"), body.get("reward_id"), body.get("count", 1)
         if not (isinstance(channel, str) and isinstance(reward_id, str) and reward_id):
             return 400, {"error": "channel e reward_id obrigatórios"}
-        return 200, redeem_reward(miner, channel, reward_id)
+        if not (type(count) is int and 1 <= count <= MAX_COUNT):
+            return 400, {"error": f"quantidade entre 1 e {MAX_COUNT}"}
+        return 200, redeem_reward(miner, channel, reward_id, count)
     return 404, {"error": "não encontrado"}
 
 
