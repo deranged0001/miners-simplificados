@@ -125,9 +125,16 @@ dialog select:focus-visible { outline: 2px solid var(--green); outline-offset: 2
 .reward .btn { font-size: 13px; padding: 7px 12px; white-space: nowrap; font-weight: 600; }
 .reward .btn.go { background: var(--green); color: #000; border-color: var(--green); }
 .reward .btn.go:hover:not(:disabled) { color: #000; filter: brightness(1.1); }
-#rdMsg { margin-top: 12px; font-size: 13px; min-height: 18px; }
-#rdMsg.ok { color: var(--green); }
-#rdMsg.err { color: var(--red); }
+#rdMsg, #twMsg { margin-top: 12px; font-size: 13px; min-height: 18px; }
+#rdMsg.ok, #twMsg.ok { color: var(--green); }
+#rdMsg.err, #twMsg.err { color: var(--red); }
+#twList .reward { flex-wrap: wrap; }
+.qty { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.qty input {
+  width: 64px; background: var(--surface); color: var(--text); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 13px;
+}
+.qty input:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .dlg-foot { display: flex; justify-content: flex-end; margin-top: 12px; }
 
 .empty { color: var(--muted); text-align: center; padding: 48px 16px; border: 1px dashed var(--line); border-radius: var(--radius); }
@@ -173,6 +180,7 @@ dialog select:focus-visible { outline: 2px solid var(--green); outline-offset: 2
       <button class="btn" id="reFail" disabled>↻ Reconectar falhas</button>
       <button class="btn" id="reAll">↻ Reconectar todos</button>
       <button class="btn" id="rdOpen">🎁 Resgatar</button>
+      <button class="btn" id="twOpen">🎁 Twitch</button>
     </div>
   </div>
   <p class="alive" id="msg" role="status" style="margin:-4px 0 12px"></p>
@@ -188,6 +196,18 @@ dialog select:focus-visible { outline: 2px solid var(--green); outline-offset: 2
   <div class="rewards" id="rdList"></div>
   <p id="rdMsg" role="status"></p>
   <div class="dlg-foot"><button class="btn" id="rdClose">Fechar</button></div>
+</dialog>
+
+<dialog id="tw" aria-labelledby="twTitle">
+  <h3 id="twTitle">Resgatar na Twitch</h3>
+  <p class="hint">Gasta pontos de verdade, sem volta. Escolha a recompensa e quantas vezes resgatar.
+    Usa o login do miner da Twitch.</p>
+  <label for="twChan" class="hint" style="display:block;margin-bottom:4px">Canal</label>
+  <select id="twChan"></select>
+  <div class="balance" id="twBal"></div>
+  <div class="rewards" id="twList"></div>
+  <p id="twMsg" role="status"></p>
+  <div class="dlg-foot"><button class="btn" id="twClose">Fechar</button></div>
 </dialog>
 
 <script>
@@ -523,6 +543,131 @@ $("rdOpen").addEventListener("click", () => {
   if (sel.value) rdLoad();
 });
 $("rdChan").addEventListener("change", rdLoad);
+
+// Twitch: a lista e o saldo vêm da Twitch na hora; o botão só libera se o saldo cobrir o lote inteiro
+let twBalance = null;
+let twBusy = false;
+
+function twStatus(text, kind = "") {
+  $("twMsg").textContent = text;
+  $("twMsg").className = kind;
+}
+
+async function twLoad() {
+  const channel = $("twChan").value;
+  $("twList").replaceChildren();
+  $("twBal").textContent = "Carregando recompensas…";
+  twStatus("");
+  try {
+    const res = await fetch("/api/twitch/rewards?channel=" + encodeURIComponent(channel), { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.status);
+    if (channel !== $("twChan").value) return;  // trocou de canal no meio
+    twBalance = data.points;
+    $("twBal").innerHTML = twBalance === null ? "Saldo indisponível" : "Saldo: <b></b> pontos";
+    if (twBalance !== null) $("twBal").querySelector("b").textContent = fmt(twBalance);
+    if (!data.rewards.length) {
+      $("twList").innerHTML = '<p class="hint">Nenhuma recompensa ativa agora. Muitas só aparecem com a live no ar.</p>';
+      return;
+    }
+    $("twList").replaceChildren(...data.rewards.map(r => twRow(channel, r)));
+  } catch (e) {
+    $("twBal").textContent = "";
+    twStatus("Não foi possível carregar: " + e.message, "err");
+  }
+}
+
+function twRow(channel, r) {
+  const row = document.createElement("div");
+  row.className = "reward";
+  row.style.borderLeftColor = /^#[0-9a-f]{3,8}$/i.test(r.color) ? r.color : "var(--line)";
+  row.innerHTML = '<div class="info"><b></b><small></small></div>' +
+    '<label class="qty">Qtd <input type="number" min="1" step="1" value="1"></label><button class="btn"></button>';
+  // Títulos e descrições vêm do canal: textContent evita injetar HTML
+  row.querySelector("b").textContent = r.title;
+  const affordable = twBalance === null || !r.cost ? 0 : Math.floor(twBalance / r.cost);
+  const max = Math.min(r.max_count, affordable);
+  row.querySelector("small").textContent = `${fmt(r.cost)} pts cada` +
+    (r.max_count < 50 ? ` · limite agora: ${r.max_count}` : "") +
+    (r.description ? " · " + r.description : "");
+  const input = row.querySelector("input");
+  const btn = row.querySelector("button");
+  input.max = Math.max(max, 1);
+  input.setAttribute("aria-label", "Quantidade de " + r.title);
+  const blocked = r.paused ? "Pausada ou esgotada" : r.needs_input ? "Pede texto: resgate pelo site da Twitch"
+    : r.cooldown ? "Em tempo de espera" : r.max_count < 1 ? "Limite atingido" : null;
+  const update = () => {
+    const n = Number(input.value);
+    const total = r.cost * n;
+    btn.textContent = Number.isInteger(n) && n > 0 ? `Resgatar ${n}× · ${fmt(total)} pts` : "Resgatar";
+    let why = blocked;
+    if (!why && !(Number.isInteger(n) && n >= 1)) why = "Quantidade inválida";
+    if (!why && n > r.max_count) why = `Esta recompensa permite no máximo ${r.max_count} agora`;
+    if (!why && (twBalance === null || twBalance < total)) why = twBalance === null
+      ? "Saldo indisponível" : `Faltam ${fmt(total - twBalance)} pontos`;
+    btn.disabled = twBusy || !!why;
+    btn.classList.toggle("go", !why);
+    btn.title = why || "";
+  };
+  input.disabled = !!blocked;
+  input.addEventListener("input", update);
+  btn.addEventListener("click", () => twRedeem(channel, r, Number(input.value), btn));
+  update();
+  return row;
+}
+
+async function twRedeem(channel, r, n, btn) {
+  if (twBusy || btn.disabled) return;
+  if (!confirm(`Resgatar "${r.title}" ${n}× em ${channel}, gastando ${fmt(r.cost * n)} pontos?`)) return;
+  twBusy = true;
+  document.querySelectorAll("#twList button, #twList input").forEach(b => b.disabled = true);
+  btn.textContent = `Resgatando ${n}×…`;
+  twStatus("");
+  try {
+    const res = await fetch("/api/twitch/redeem", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel, reward_id: r.id, count: n }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.status);
+    const saldo = data.points !== null ? ` · saldo agora ${fmt(data.points)}` : "";
+    if (data.stopped) twStatus(`Resgatou ${data.done} de ${data.requested}: parou porque ${data.stopped}${saldo}`, data.done ? "" : "err");
+    else twStatus(`Resgatado: ${data.title} ${data.done}×${saldo}`, "ok");
+  } catch (e) {
+    twStatus("Resgate falhou: " + e.message, "err");
+  }
+  twBusy = false;
+  const msg = [$("twMsg").textContent, $("twMsg").className];
+  await twLoad();
+  twStatus(...msg);
+}
+
+$("twOpen").addEventListener("click", async () => {
+  const sel = $("twChan");
+  const prev = sel.value;
+  $("tw").showModal();
+  try {
+    const res = await fetch("/api/twitch/channels", { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.status);
+    sel.replaceChildren(...data.channels.map(c => {
+      const o = document.createElement("option");
+      o.value = o.textContent = c;
+      return o;
+    }));
+    if (prev && data.channels.includes(prev)) sel.value = prev;
+    if (sel.value) twLoad();
+    else twStatus("Nenhum canal da Twitch configurado.", "err");
+  } catch (e) {
+    sel.replaceChildren();
+    $("twList").replaceChildren();
+    $("twBal").textContent = "";
+    twStatus(e.message, "err");
+  }
+});
+$("twChan").addEventListener("change", twLoad);
+$("twClose").addEventListener("click", () => $("tw").close());
 $("rdClose").addEventListener("click", () => $("rd").close());
 
 async function refresh() {

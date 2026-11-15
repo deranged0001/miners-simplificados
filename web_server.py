@@ -5,6 +5,7 @@ from flask import Flask, render_template_string, jsonify, send_file, request
 from loguru import logger
 from datetime import datetime
 from utils.channel_rewards import RedeemError
+from utils.twitch_rewards import TwitchRewards, MAX_COUNT
 
 data_lock = threading.Lock()
 _account_manager = None
@@ -823,6 +824,56 @@ def redeem():
     except Exception as e:
         logger.error(f"API /api/redeem error: {e}")
         return jsonify({"error": "falha ao falar com a Kick"}), 502
+
+
+_twitch = TwitchRewards()
+
+
+@app.route('/api/twitch/channels')
+def twitch_channels():
+    try:
+        return jsonify({"channels": _twitch.channels()})
+    except RedeemError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route('/api/twitch/rewards')
+def twitch_rewards():
+    channel = request.args.get("channel", "")
+    if channel not in _twitch.channels():
+        return jsonify({"error": "canal fora da lista da Twitch"}), 400
+    try:
+        return jsonify(_twitch.list(channel))
+    except RedeemError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"API /api/twitch/rewards error: {e}")
+        return jsonify({"error": "falha ao consultar a Twitch"}), 502
+
+
+@app.route('/api/twitch/redeem', methods=['POST'])
+def twitch_redeem():
+    # Gasta pontos: JSON obrigatório (preflight CORS) além da checagem de Origin
+    if not request.is_json:
+        return jsonify({"error": "JSON obrigatório"}), 415
+    body = request.get_json(silent=True) or {}
+    channel, reward_id, count = body.get("channel"), body.get("reward_id"), body.get("count")
+    if not (isinstance(channel, str) and isinstance(reward_id, str) and reward_id):
+        return jsonify({"error": "channel e reward_id obrigatórios"}), 400
+    if not (isinstance(count, int) and not isinstance(count, bool) and 1 <= count <= MAX_COUNT):
+        return jsonify({"error": f"quantidade entre 1 e {MAX_COUNT}"}), 400
+    try:
+        if channel not in _twitch.channels():
+            return jsonify({"error": "canal fora da lista da Twitch"}), 400
+        result = _twitch.redeem(channel, reward_id, count)
+    except RedeemError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"API /api/twitch/redeem error: {e}")
+        return jsonify({"error": "falha ao falar com a Twitch"}), 502
+    logger.info(f"🎁 Twitch {channel}: resgatou '{result['title']}' {result['done']}/{count}x"
+                + (f" (parou: {result['stopped']})" if result["stopped"] else ""))
+    return jsonify(result)
 
 
 def start_server(streamers_data, port=5000):
