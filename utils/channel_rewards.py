@@ -13,6 +13,8 @@ import time
 from utils.get_points_amount import PointsAmount
 
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+MAX_COUNT = 50      # teto de resgates de uma vez
+REDEEM_GAP = 0.6    # segundos entre um resgate e o próximo do mesmo lote
 
 
 def new_ulid() -> str:
@@ -77,15 +79,18 @@ class ChannelRewards:
                     "paused": bool(r.get("is_paused")),
                     # Recompensas que pedem texto não são suportadas pelo painel
                     "needs_input": bool(r.get("is_user_input_required")),
+                    # A Kick não mostra limites por live; se ela recusar no meio, o lote para
+                    "max_count": MAX_COUNT,
+                    "limit_reason": None,
                 }
                 for r in rewards
             ],
         }
 
-    def redeem(self, channel: str, reward_id: str) -> dict:
+    def redeem(self, channel: str, reward_id: str, count: int = 1) -> dict:
         with self.lock:
             self._prepare(channel)
-            # Confere de novo na Kick: o id tem que existir, estar ativo e caber no saldo
+            # Confere de novo na Kick: o id tem que existir, estar ativo e o lote inteiro caber no saldo
             reward = next((r for r in self._list(channel) if r.get("id") == reward_id), None)
             if reward is None:
                 raise RedeemError("essa recompensa não existe mais neste canal")
@@ -93,17 +98,29 @@ class ChannelRewards:
                 raise RedeemError("essa recompensa está pausada")
             if reward.get("is_user_input_required"):
                 raise RedeemError("essa recompensa pede um texto; resgate pelo site da Kick")
+            cost = reward.get("cost", 0)
             points = self.client.get_amount(channel, self.token)
-            if points is not None and points < reward.get("cost", 0):
-                raise RedeemError(f"saldo insuficiente: {points} de {reward.get('cost')} pontos")
+            if points is None:
+                raise RedeemError("não foi possível ler o saldo")
+            if points < cost * count:
+                raise RedeemError(f"saldo insuficiente: {points} de {cost * count} pontos")
 
-            resp = self.client.session.post(
-                f"https://kick.com/api/v2/channels/{channel}/rewards/{reward_id}/redeem",
-                json={"transaction_id": new_ulid(), "message": ""},
-                timeout=15,
-            )
-            if resp.status_code not in (200, 201):
-                msg = self._json(resp).get("message") or ""
-                raise RedeemError(f"a Kick recusou o resgate ({resp.status_code}) {msg}".strip())
+            done, stopped = 0, None
+            for i in range(count):
+                if i:
+                    time.sleep(REDEEM_GAP)
+                resp = self.client.session.post(
+                    f"https://kick.com/api/v2/channels/{channel}/rewards/{reward_id}/redeem",
+                    json={"transaction_id": new_ulid(), "message": ""},
+                    timeout=15,
+                )
+                if resp.status_code not in (200, 201):
+                    msg = self._json(resp).get("message") or ""
+                    stopped = f"a Kick recusou o resgate ({resp.status_code}) {msg}".strip()
+                    break
+                done += 1
+            if not done and stopped:
+                raise RedeemError(stopped)
             new_points = self.client.get_amount(channel, self.token)
-        return {"title": reward.get("title", ""), "cost": reward.get("cost", 0), "points": new_points}
+        return {"title": reward.get("title", ""), "cost": cost, "points": new_points,
+                "done": done, "requested": count, "stopped": stopped}

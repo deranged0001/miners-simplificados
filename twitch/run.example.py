@@ -124,20 +124,25 @@ def load_rewards(miner, channel):
 
 
 def redeem_limit(r):
-    """Quantas vezes dá para resgatar seguido, pelos limites que a Twitch mostra.
+    """(quantas vezes dá para resgatar seguido, motivo do limite), pelos limites que a Twitch mostra.
     O limite por pessoa conta resgates que a Twitch não informa aqui; se estourar, o lote para."""
-    limit = MAX_COUNT
+    limits = [(MAX_COUNT, None)]
     per_stream = r.get("maxPerStreamSetting") or {}
     if per_stream.get("isEnabled"):
-        limit = min(limit, per_stream.get("maxPerStream", 0) - (r.get("redemptionsRedeemedCurrentStream") or 0))
+        left = per_stream.get("maxPerStream", 0) - (r.get("redemptionsRedeemedCurrentStream") or 0)
+        limits.append((left, f"restam {max(left, 0)} nesta live (limite do canal)"))
     per_user = r.get("maxPerUserPerStreamSetting") or {}
     if per_user.get("isEnabled"):
-        limit = min(limit, per_user.get("maxPerUserPerStream", 0))
-    if (r.get("globalCooldownSetting") or {}).get("isEnabled"):
-        limit = min(limit, 1)  # com tempo de espera, só um por vez
+        n = per_user.get("maxPerUserPerStream", 0)
+        limits.append((n, f"o canal permite {n} por pessoa por live"))
+    cooldown = r.get("globalCooldownSetting") or {}
+    if cooldown.get("isEnabled"):
+        mins = max(round(cooldown.get("globalCooldownSeconds", 0) / 60), 1)
+        limits.append((1, f"o canal pôs {mins} min de espera entre resgates; a Twitch recusa outro antes disso"))
     if r.get("cooldownExpiresAt"):
-        limit = 0
-    return max(limit, 0)
+        limits.append((0, "em tempo de espera agora; tente daqui a pouco"))
+    limit, reason = min(limits, key=lambda x: x[0])
+    return max(limit, 0), reason
 
 
 def list_rewards(miner, channel):
@@ -154,7 +159,8 @@ def list_rewards(miner, channel):
                 "color": r.get("backgroundColor") or "",
                 "paused": bool(r.get("isPaused")) or not r.get("isInStock", True),
                 "needs_input": bool(r.get("isUserInputRequired")),
-                "max_count": redeem_limit(r),
+                "max_count": redeem_limit(r)[0],
+                "limit_reason": redeem_limit(r)[1],
             }
             for r in rewards
         ), key=lambda r: r["cost"]),
@@ -176,8 +182,9 @@ def redeem_reward(miner, channel, reward_id, count=1):
         cost = reward["cost"]
         if points < cost * count:
             raise RedeemError(f"saldo insuficiente: {points} de {cost * count} pontos")
-        if count > redeem_limit(reward):
-            raise RedeemError(f"esta recompensa permite no máximo {redeem_limit(reward)} agora")
+        limit, reason = redeem_limit(reward)
+        if count > limit:
+            raise RedeemError(f"no máximo {limit} agora: {reason}")
 
         done, stopped = 0, None
         for i in range(count):

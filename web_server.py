@@ -7,7 +7,7 @@ import urllib.request
 from flask import Flask, render_template_string, jsonify, send_file, request
 from loguru import logger
 from datetime import datetime
-from utils.channel_rewards import RedeemError
+from utils.channel_rewards import RedeemError, MAX_COUNT
 
 data_lock = threading.Lock()
 _account_manager = None
@@ -816,11 +816,13 @@ def redeem():
     if _account_manager is None:
         return jsonify({"error": "Miner não iniciado"}), 503
     body = request.get_json(silent=True) or {}
-    channel, reward_id = body.get("channel"), body.get("reward_id")
+    channel, reward_id, count = body.get("channel"), body.get("reward_id"), body.get("count", 1)
     if not (isinstance(channel, str) and isinstance(reward_id, str) and reward_id):
         return jsonify({"error": "channel e reward_id obrigatórios"}), 400
+    if not (type(count) is int and 1 <= count <= MAX_COUNT):
+        return jsonify({"error": f"quantidade entre 1 e {MAX_COUNT}"}), 400
     try:
-        return jsonify(_account_manager.redeem_reward(channel, reward_id))
+        return jsonify(_account_manager.redeem_reward(channel, reward_id, count))
     except RedeemError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
