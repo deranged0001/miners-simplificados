@@ -637,11 +637,12 @@ class AccountManager:
         """Chamado pela thread do painel."""
         return self._rewards_for(channel)[1].list(channel)
 
-    def redeem_reward(self, channel: str, reward_id: str) -> dict:
+    def redeem_reward(self, channel: str, reward_id: str, count: int = 1) -> dict:
         """Chamado pela thread do painel. Gasta pontos de verdade."""
         w, rewards = self._rewards_for(channel)
-        result = rewards.redeem(channel, reward_id)
-        logger.info(f"[{w.alias}] 🎁 {channel}: resgatou '{result['title']}' por {result['cost']} pontos")
+        result = rewards.redeem(channel, reward_id, count)
+        logger.info(f"[{w.alias}] 🎁 {channel}: resgatou '{result['title']}' {result['done']}/{count}x "
+                    f"por {result['cost']} pontos cada" + (f" (parou: {result['stopped']})" if result["stopped"] else ""))
         if result["points"] is not None:
             w.state.streamers[channel].points = result["points"]
         return result
